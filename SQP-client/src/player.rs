@@ -25,8 +25,6 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
     let response = receive_message(&mut player_stream).expect("Failed to receive subscription response");
     println!("Server response for player {}: {}", player_name, response);
 
-    // timeout 1/100 of a second
-    std::thread::sleep(std::time::Duration::from_millis(500));
 
     // Labyrinth-solving loop
     let mut current_direction = Direction::Front; // Start by trying to move forward
@@ -42,6 +40,9 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
         // Receive the server's response to the action
         let action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
         println!("Player {} received response: {}", player_name, action_response);
+
+        // timeout 1/100 of a second
+        std::thread::sleep(std::time::Duration::from_millis(10));
 
         // Check for exit condition
         if action_response.contains("FoundExit") {
