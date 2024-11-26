@@ -59,7 +59,9 @@ fn main() -> io::Result<()> {
 
 
     // Step 5: Spawn threads for each player
-    let players = ["Nino", "Paul", "Lorianne", "Clarence"];
+    // let players = ["Nino", "Paul", "Lorianne", "Clarence"];
+    // fixme only 1 player for testing
+    let players = ["Nino"];
     let mut handles = vec![];
     for player in players.iter() {
         let player_name = player.to_string();
