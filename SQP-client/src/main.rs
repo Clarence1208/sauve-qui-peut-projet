@@ -1,22 +1,22 @@
+extern crate core;
+
 mod player;
 mod models;
-mod serverUtils;
+mod server_utils;
+mod decoder;
 
 use models::{Action, Direction, Message, RegisterTeam, SubscribePlayer};
 use player::player_thread;
-use serde::{Deserialize, Serialize};
-use serde_json;
-use serverUtils::{parse_token_from_response, receive_message, send_message};
-use std::io::{self, Read, Write};
+use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::net::TcpStream;
-use std::{env, thread};
+use std::{env, io, thread};
 
 
 fn main() -> io::Result<()> {
     // Step 1: Get server address from command line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        eprintln!("Usage: worker <server_address>");use serde::{Deserialize, Serialize};
+        eprintln!("Usage: worker <server_address>");
         std::process::exit(1);
     }
     let server_address = &args[1];
@@ -28,7 +28,7 @@ fn main() -> io::Result<()> {
     }
 
     // Step 2: Connect to the server
-    let mut teamStream = TcpStream::connect(server_address)?;
+    let mut team_stream = TcpStream::connect(server_address)?;
     println!("Connected to server at {}", server_address);
 
     // Step 3: Register the team
@@ -39,12 +39,12 @@ fn main() -> io::Result<()> {
     let register_team_message = Message::RegisterTeam(RegisterTeam {
         name: team_name.to_string(),
     });
-    send_message(&mut teamStream, &register_team_message)?;
+    send_message(&mut team_stream, &register_team_message)?;
     println!("Registered team: {}", team_name);
 
 
     // Step 4: Receive the registration token
-    let response = receive_message(&mut teamStream)?;
+    let response = receive_message(&mut team_stream)?;
     println!("Server response: {}", response);
     println!("Raw server response: {:?}", response);
 

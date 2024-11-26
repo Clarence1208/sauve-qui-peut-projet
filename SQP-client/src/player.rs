@@ -1,6 +1,7 @@
-use std::net::TcpStream;
+use crate::server_utils::{receive_message, send_message};
 use crate::{Action, Direction, Message, SubscribePlayer};
-use crate::serverUtils::{send_message, receive_message};
+use std::net::TcpStream;
+use crate::decoder::decode;
 
 /**
  * The player_thread function represents the main logic for each player thread.
@@ -28,6 +29,7 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
 
     // Labyrinth-solving loop
     let mut current_direction = Direction::Front; // Start by trying to move forward
+    let mut blocked_count = 0; // Count the number of consecutive blocked movements
 
     loop {
         // Send the current movement action
@@ -41,6 +43,8 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
         let action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
         println!("Player {} received response: {}", player_name, action_response);
 
+        parse_radar_response(&action_response);
+
         // timeout 1/100 of a second
         std::thread::sleep(std::time::Duration::from_millis(10));
 
@@ -52,14 +56,54 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
 
         // Check if movement was blocked
         if action_response.contains("CannotPassThroughWall") {
-            // If movement is blocked, turn right
-            current_direction = match current_direction {
-                Direction::Front => Direction::Right,
-                Direction::Right => Direction::Back,
-                Direction::Back => Direction::Left,
-                Direction::Left => Direction::Front,
-            };
+            if blocked_count > 2 {
+                // reset blocked count
+                blocked_count = 0;
+                // turn around
+                current_direction = match current_direction {
+                    Direction::Front => Direction::Back,
+                    Direction::Right => Direction::Left,
+                    Direction::Back => Direction::Front,
+                    Direction::Left => Direction::Right,
+                };
+            } else {
+
+                // If movement is blocked, turn right
+                current_direction = match current_direction {
+                    Direction::Front => Direction::Right,
+                    Direction::Right => Direction::Back,
+                    Direction::Back => Direction::Left,
+                    Direction::Left => Direction::Front,
+                };
+            }
+            blocked_count += 1;
             println!("Player {} hit a wall, turning to {:?}", player_name, current_direction);
         }
+    }
+
+    pub(crate) fn parse_radar_response(response: &str) {
+        if response.contains("CannotPassThroughWall") {
+            return;
+        }
+
+        // Extract the radar data from the response as a string
+        // response format: {"RadarView":"aeQrajHOapap//a"}
+        let radar_data = response
+            .split("\":\"")
+            .nth(1)
+            .unwrap()
+            .split("\"")
+            .next()
+            .unwrap();
+
+
+        // Print the radar data
+        println!("Radar data: {}", radar_data);
+
+        // decode the radar data
+        let decoded_radar_data = decode(&radar_data);
+
+        // Print the decoded radar data
+        println!("Decoded radar data: {:?}", decoded_radar_data);
     }
 }
