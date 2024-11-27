@@ -41,31 +41,33 @@ pub fn send_message(stream: &mut TcpStream, message: &impl Serialize) -> io::Res
 pub fn receive_message(stream: &mut TcpStream) -> io::Result<String> {
     // Read the length of the incoming message
     let mut length_buffer = [0; 4];
-    stream.read_exact(&mut length_buffer).map_err(|_| {
-        io::Error::new(io::ErrorKind::UnexpectedEof, "Failed to read message length")
-    })?;
+    stream.read_exact(&mut length_buffer)?;
     let message_length = u32::from_le_bytes(length_buffer) as usize;
     println!("Received message length: {}", message_length);
 
-    let mut message_buffer = Vec::with_capacity(message_length);
+    // Now read the message itself
+    let mut message_buffer = vec![0; message_length];
     let mut total_read = 0;
 
     while total_read < message_length {
-        let mut chunk = vec![0; message_length - total_read];
-        let bytes_read = stream.read(&mut chunk)?;
-        if bytes_read == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "Connection closed before full message was received",
-            ));
+        match stream.read(&mut message_buffer[total_read..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Connection closed before full message was received",
+                ));
+            }
+            Ok(n) => {
+                total_read += n;
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
         }
-        total_read += bytes_read;
-        message_buffer.extend_from_slice(&chunk[..bytes_read]);
     }
 
-    String::from_utf8(message_buffer)
-        .map(|msg| msg.trim_matches(char::from(0)).to_string())
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 message received"))
+    let message = String::from_utf8(message_buffer)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 message received"))?;
+    Ok(message)
 }
 
 
