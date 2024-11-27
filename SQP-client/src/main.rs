@@ -59,17 +59,22 @@ fn main() -> io::Result<()> {
 
 
     // Step 5: Spawn threads for each player
-    // let players = ["Nino", "Paul", "Lorianne", "Clarence"];
+    let players = ["Nino", "Paul", "Loriane"];
     // fixme only 1 player for testing
-    let players = ["Nino"];
+    // let players = ["Nino"];
     let mut handles = vec![];
     for player in players.iter() {
         let player_name = player.to_string();
         let registration_token = registration_token.clone();
         let server_address = server_address.clone();
-        handles.push(thread::spawn(move || {
-            player_thread(player_name, registration_token, server_address);
-        }));
+        // Spawn a new thread for each player, name the thread with the player's name
+        handles.push(thread::Builder::new()
+            .name(player_name.clone())
+            .spawn(move || {
+                player_thread(player_name, registration_token, server_address)
+            })
+            .expect("Failed to spawn player thread")
+        );
     }
 
     // Wait for all threads to complete
