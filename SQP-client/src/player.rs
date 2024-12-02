@@ -1,16 +1,21 @@
 use crate::decoder::decode;
+use crate::models::{turn_left, Direction};
+use crate::request_models::{Action, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
-use crate::{Action, Direction, Message, SubscribePlayer};
+use log::log;
 use std::cmp::PartialEq;
 use std::io::Write;
 use std::net::TcpStream;
 
-#[derive(Debug)]
+/**
+ * The Boundary enum represents the different types of boundaries in the labyrinth.
+ */
+#[derive(Debug, Clone, Eq, Hash)]
 enum Boundary {
     Undefined,
     Open,
     Wall,
-    Error,
+    BoundaryError,
 }
 
 impl Boundary {
@@ -19,7 +24,7 @@ impl Boundary {
             Boundary::Undefined => Boundary::Undefined,
             Boundary::Open => Boundary::Open,
             Boundary::Wall => Boundary::Wall,
-            Boundary::Error => Boundary::Error,
+            Boundary::BoundaryError => Boundary::BoundaryError,
         }
     }
 }
@@ -30,13 +35,16 @@ impl PartialEq for Boundary {
             (Boundary::Undefined, Boundary::Undefined) => true,
             (Boundary::Open, Boundary::Open) => true,
             (Boundary::Wall, Boundary::Wall) => true,
-            (Boundary::Error, Boundary::Error) => true,
+            (Boundary::BoundaryError, Boundary::BoundaryError) => true,
             _ => false,
         }
     }
 }
 
-#[derive(Debug)]
+/**
+ * The Entity enum represents the different types of entities in the labyrinth.
+ */
+#[derive(Debug, Eq, Hash, Clone)]
 enum Entity {
     None,
     Ally,
@@ -44,7 +52,22 @@ enum Entity {
     Monster,
 }
 
-#[derive(Debug)]
+impl PartialEq for Entity {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Entity::None, Entity::None) => true,
+            (Entity::Ally, Entity::Ally) => true,
+            (Entity::Enemy, Entity::Enemy) => true,
+            (Entity::Monster, Entity::Monster) => true,
+            _ => false,
+        }
+    }
+}
+
+/**
+ * The Item enum represents the different types of items in the labyrinth.
+ */
+#[derive(Debug, Eq, Hash, Clone)]
 enum Item {
     None,
     Hint,
@@ -62,8 +85,15 @@ impl PartialEq for Item {
     }
 }
 
-#[derive(Debug)]
+/**
+ * The RadarCell struct represents a cell in the radar view.
+ * It contains an item and an entity.
+ * The item represents the type of item in the cell (None, Hint, Goal).
+ * The entity represents the type of entity in the cell (None, Ally, Enemy, Monster).
+ */
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct RadarCell {
+    is_undefined: bool,
     item: Item,
     entity: Entity,
 }
@@ -76,7 +106,7 @@ struct RadarCell {
  * @param registration_token: String - The registration token for the player
  * @param server_address: String - The address of the server
  */
-pub(crate) fn player_thread(player_name: String, registration_token: String, server_address: String) {
+pub(crate) fn start_player_thread(player_name: String, registration_token: String, server_address: String) {
     let mut player_stream = TcpStream::connect(server_address).expect("Failed to connect to server");
     println!("Connected for player: {}", player_name);
 
@@ -99,42 +129,35 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
     let response = receive_message(&mut player_stream).expect("Failed to receive radar response");
     println!("Player {} received radar response: {}", player_name, response);
 
+    search_for_exit(player_name, player_stream, response);
+
+    // fixme remove, only for testing
+    // choose_direction_by_hand(player_name, player_stream);
+}
+
+/**
+ * The search_for_exit function represents the main logic for each player to solve the labyrinth.
+ * It receives the initial radar response and enters a loop to explore the labyrinth and find the exit.
+ *
+ * @param player_name: String - The name of the player
+ * @param player_stream: TcpStream - The TCP stream for the player
+ * @param initial_radar_response: String - The initial radar response from the server
+ */
+fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initial_radar_response: String) {
+
     // Parse the radar to get the initial state of the labyrinth
-    let (mut cells, mut horizontal_passages, mut vertical_passages) = parse_radar_responseRefact(&response);
-
-
+    let (mut cells,
+        mut horizontal_passages,
+        mut vertical_passages) = parse_radar_response(&initial_radar_response);
     // Initial player direction
     let mut current_direction = Direction::Right; // allways try to go right first
 
     // main loop for player movement
     loop {
-
         // check if the player can go right else try front then left then back
-        let mut can_go_right = is_direction_open(&Direction::Right, &horizontal_passages, &vertical_passages);
-        print!("can go right: {}", can_go_right);
-
-        if !can_go_right {
-            can_go_right = is_direction_open(&Direction::Front, &horizontal_passages, &vertical_passages);
-            print!("can go front: {}", can_go_right);
-            current_direction = Direction::Front;
-
-            if !can_go_right {
-                can_go_right = is_direction_open(&Direction::Left, &horizontal_passages, &vertical_passages);
-                print!("can go left: {}", can_go_right);
-                current_direction = Direction::Left;
-
-                if !can_go_right {
-                    can_go_right = is_direction_open(&Direction::Back, &horizontal_passages, &vertical_passages);
-                    print!("can go back: {}", can_go_right);
-                    current_direction = Direction::Back;
-                }
-            }
+        while !is_direction_open(&current_direction, &horizontal_passages, &vertical_passages) {
+            current_direction = turn_left(&current_direction);
         }
-
-
-        // while !is_direction_open( &current_direction, &horizontal_passages, &vertical_passages) {
-        //     current_direction = turn_left(&current_direction);
-        // }
         // Send the current movement action
         let action_message = Message::Action(Action {
             MoveTo: current_direction.clone(),
@@ -164,9 +187,8 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
         }
 
 
-
         // parse and update cells, horizontal and vertical passages
-        (cells, horizontal_passages, vertical_passages) = parse_radar_responseRefact(&action_response);
+        (cells, horizontal_passages, vertical_passages) = parse_radar_response(&action_response);
         current_direction = Direction::Right; // Reset the direction to right
 
         // timeout 1/100 of a second
@@ -179,83 +201,60 @@ pub(crate) fn player_thread(player_name: String, registration_token: String, ser
             eprintln!("Player {} hit a wall, turning to {:?}", player_name, current_direction);
         }
     }
-
-    // fixme for testing waiting for user input 1,2,3 or 4
-    // while true {
-    //
-    //
-    //     // 1 = front, 2 = right, 3 = back, 4 = left
-    //     let mut input = String::new();
-    //     std::io::stdin().read_line(&mut input).expect("Failed to read line");
-    //     let input = input.trim();
-    //     match input {
-    //         "1" => current_direction = Direction::Front,
-    //         "2" => current_direction = Direction::Right,
-    //         "3" => current_direction = Direction::Back,
-    //         "4" => current_direction = Direction::Left,
-    //         _ => println!("Invalid input"),
-    //     }
-    //
-    //     let action_message = Message::Action(Action {
-    //         MoveTo: current_direction.clone(),
-    //     });
-    //     send_message(&mut player_stream, &action_message).expect("Failed to send action");
-    //     println!("Player {} sent action: {:?}", player_name, current_direction);
-    //
-    //     // Receive the server's response to the action
-    //     let action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
-    //     println!("Player {} received response: {}", player_name, action_response);
-    //
-    //     player_stream.flush().expect("Failed to flush stream");
-    //
-    //     parse_radar_response(&action_response);
-    // }
 }
 
-fn turn_right(current_direction: &Direction) -> Direction {
-    match current_direction {
-        Direction::Front => Direction::Right,
-        Direction::Right => Direction::Back,
-        Direction::Back => Direction::Left,
-        Direction::Left => Direction::Front,
-    }
-}
-
-fn turn_left(current_direction: &Direction) -> Direction {
-    match current_direction {
-        Direction::Front => Direction::Left,
-        Direction::Left => Direction::Back,
-        Direction::Back => Direction::Right,
-        Direction::Right => Direction::Front,
-    }
-}
-
-impl PartialEq for &Direction {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Direction::Front, Direction::Front) => true,
-            (Direction::Right, Direction::Right) => true,
-            (Direction::Back, Direction::Back) => true,
-            (Direction::Left, Direction::Left) => true,
-            _ => false,
+// fixme remove, only for testing
+// waiting for user input 1,2,3 or 4
+fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
+    let mut current_direction = Direction::Right;
+    while true {
+        // 1 = front, 2 = right, 3 = back, 4 = left
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).expect("Failed to read line");
+        let input = input.trim();
+        match input {
+            "1" => current_direction = Direction::Front,
+            "2" => current_direction = Direction::Right,
+            "3" => current_direction = Direction::Back,
+            "4" => current_direction = Direction::Left,
+            _ => println!("Invalid input"),
         }
+
+        let action_message = Message::Action(Action {
+            MoveTo: current_direction.clone(),
+        });
+        send_message(&mut player_stream, &action_message).expect("Failed to send action");
+        println!("Player {} sent action: {:?}", player_name, current_direction);
+
+        // Receive the server's response to the action
+        let action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
+        println!("Player {} received response: {}", player_name, action_response);
+
+        player_stream.flush().expect("Failed to flush stream");
+
+        parse_radar_response(&action_response);
     }
 }
 
+/**
+ * The is_direction_open function checks if the player can move in the given direction.
+ * It takes the next direction, the horizontal passages, and the vertical passages as input.
+ * It returns true if the direction is open, false otherwise.
+ */
 fn is_direction_open(
     next_direction: &Direction,
     h_passages: &Vec<Boundary>,
     v_passages: &Vec<Boundary>,
 ) -> bool {
-    // On suppose que le joueur est dans la cellule centrale (index 4)
-    // On vérifie le passage dans la direction souhaitée.
+    // We know the player is in the center cell of the radar view.
+    // We are following the right-hand rule, so we want to check the passage to the right of the player.
 
-    // Mappe la direction au passage correspondant
+    // Map the next direction to the passage index
     let passage_index = match next_direction {
-        Direction::Front => 7, // Passage devant
-        Direction::Right => 5, // Passage à droite
-        Direction::Back => 4,  // Passage derrière
-        Direction::Left => 6,  // Passage à gauche
+        Direction::Front => 4,
+        Direction::Right => 6,
+        Direction::Back => 7,
+        Direction::Left => 5,
     };
 
     // log for debugging
@@ -277,7 +276,7 @@ fn is_direction_open(
         }
     }
 
-
+    // passage checked (should always be open)
     let passage = match next_direction {
         Direction::Front | Direction::Back => &h_passages[passage_index].clone(),
         Direction::Left | Direction::Right => &v_passages[passage_index].clone(),
@@ -291,7 +290,12 @@ fn is_direction_open(
     }
 }
 
-pub(crate) fn parse_radar_responseRefact(response: &str) -> (Vec<RadarCell>, Vec<Boundary>, Vec<Boundary>) {
+/**
+ * The parse_radar_response function parses the radar response from the server.
+ * It extracts the radar data from the response, decodes the data, and parses the cells, horizontal passages, and vertical passages.
+ * It returns a tuple containing the cells, horizontal passages, and vertical passages.
+ */
+pub(crate) fn parse_radar_response(response: &str) -> (Vec<RadarCell>, Vec<Boundary>, Vec<Boundary>) {
     if response.contains("CannotPassThroughWall")
         || response.contains("FoundExit")
         || response.contains("Hint") {
@@ -335,66 +339,86 @@ pub(crate) fn parse_radar_responseRefact(response: &str) -> (Vec<RadarCell>, Vec
     // Parse les cellules (9 cellules, 4 bits chacune)
     let cells = parse_cells(&decoded_radar_data[6..11]);
 
-    // Afficher les passages horizontaux
     println!("Horizontal Passages:");
     for (i, passage) in horizontal_passages.iter().enumerate() {
         println!("  Passage {}: {:?}", i, passage);
     }
 
-    // Afficher les passages verticaux
     println!("Vertical Passages:");
     for (i, passage) in vertical_passages.iter().enumerate() {
         println!("  Passage {}: {:?}", i, passage);
     }
 
-    // Afficher les cellules
     println!("Cells:");
     for (i, cell) in cells.iter().enumerate() {
         println!("  Cell {}: {:?}", i, cell);
     }
 
-    // Afficher la carte radar
-    print_radar_map(&cells, &horizontal_passages, &vertical_passages);
+    let two_d_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
+        .map(|chunk| chunk.to_vec())
+        .collect();
+
+    // print radar map
+    println!("{}", get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages));
 
     (cells, horizontal_passages, vertical_passages)
 }
 
-fn parse_passages(data: &[u8], count: usize, passage_type: &str) -> Vec<Boundary> {
-    let mut passages = Vec::new();
-
-    // Afficher les octets originaux
-    println!("{} original bytes (hex): {:02X?}", passage_type, data);
-    println!("{} original bytes (bin): {:?}", passage_type, data.iter().map(|b| format!("{:08b}", b)).collect::<Vec<String>>());
-
-    // Combiner les octets en un entier 24 bits en little endian
-    let mut bits = 0u32;
-    for (i, &byte) in data.iter().enumerate() {
-        bits |= (byte as u32) << (8 * i);
+/**
+ * The parse_passages function extracts the passages from the radar data.<br>
+ * It rearranges the bytes to extract the passages, then extracts the passages 2 bits at a time.<br>
+ * The passages are represented by the Boundary enum. The function returns a vector of Boundary values.<br>
+ * If the radar data is empty or the number of passages is 0, the function returns an empty vector.<br>
+ * If the passage bits are invalid, the function returns a vector with BoundaryError values.<br>
+ * The function logs the original bytes, the rearranged bytes, and the extracted passages for debugging.<br>
+ */
+fn parse_passages(bytes: &[u8], num_passages: usize, passage_type: &str) -> Vec<Boundary> {
+    if bytes.is_empty() || num_passages == 0 {
+        return vec![];
     }
 
-    // Pour le logging, reconstruire les octets en big endian (inversion due au little endian)
-    let bytes_be = [(bits >> 16) as u8, (bits >> 8) as u8, bits as u8];
-    println!("{} bytes after inversion (big endian order): {:02X?}", passage_type, bytes_be);
-    println!("{} bytes after inversion (big endian order, bin): {:?}", passage_type, bytes_be.iter().map(|b| format!("{:08b}", b)).collect::<Vec<String>>());
+    let mut passages = Vec::with_capacity(num_passages);
 
-    for i in 0..count {
-        let value = (bits >> (i * 2)) & 0b11;
-        let passage = match value {
+    // Log bytes before rearrangement
+    println!("{} original bytes (hex): {:02X?}", passage_type, bytes);
+    println!("{} original bytes (bin): {:?}",
+             passage_type,
+             bytes.iter()
+                 .map(|b| format!("{:08b}", b))
+                 .collect::<Vec<String>>()
+    );
+
+    // Rearrange bytes to extract passages
+    let bits = ((bytes[2] as u32) << 16) | ((bytes[1] as u32) << 8) | (bytes[0] as u32);
+
+    // Log bytes after rearrangement
+    let bytes_be = [(bits >> 16) as u8, (bits >> 8) as u8, bits as u8];
+    println!("{} bytes after rearrangement (big endian order): {:02X?}", passage_type, bytes_be);
+    println!("{} bytes after rearrangement (big endian order, bin): {:?}",
+             passage_type,
+             bytes_be.iter()
+                 .map(|b| format!("{:08b}", b))
+                 .collect::<Vec<String>>()
+    );
+
+    // Extract passages from bits, 2 bits at a time
+    for i in 0..num_passages {
+        let shift = (num_passages - 1 - i) * 2;
+        let passage_bits = ((bits >> shift) & 0b11) as u8;
+        let passage = match passage_bits {
             0 => Boundary::Undefined,
             1 => Boundary::Open,
             2 => Boundary::Wall,
-            // valeur invalide (ne devrait pas se produire)
-            _ => Boundary::Error,
+            _ => Boundary::BoundaryError, // Valeur non définie pour 0b11
         };
-        if passage == Boundary::Error {
-            println!("Invalid passage value: {}", value);
-        }
         passages.push(passage);
     }
 
+    // log for debugging
+    log::debug!("{} extracted passages: {:?}", passage_type, passages);
+
     passages
 }
-
 
 fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
     let mut cells = Vec::new();
@@ -403,7 +427,7 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
         bits = (bits << 8) | byte as u64;
     }
 
-    // Les 4 bits de padding sont les 4 bits de poids faible
+    // The 4 padding bits are the 4 least significant bits
     bits = bits >> 4;
 
     for i in (0..9).rev() {
@@ -411,6 +435,7 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
         if value == 0b1111 {
             // Donnée invalide ou non définie
             cells.push(RadarCell {
+                is_undefined: true,
                 item: Item::None,
                 entity: Entity::None,
             });
@@ -435,87 +460,122 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
             _ => Entity::None,
         };
 
-        cells.push(RadarCell { item, entity });
+        cells.push(RadarCell { is_undefined: false, item, entity });
     }
 
     cells
 }
 
-fn print_radar_map(cells: &Vec<RadarCell>, h_passages: &Vec<Boundary>, v_passages: &Vec<Boundary>) {
-    // Symboles pour les cellules
-    let cell_symbols = |cell: &RadarCell| {
-        if cell.item == Item::Goal {
-            'G'
-        } else if cell.item == Item::Hint {
-            'H'
+/**
+* The get_radar_map_as_string function generates a string representation of the radar map.<br>
+* It takes the radar cells, horizontal passages, and vertical passages as input.<br>
+* It constructs the map line by line, using symbols to represent the different elements:
+* - '#' for undefined cells and passages
+* - ' ' for defined cells and open passages
+* - '-' for walls in horizontal passages
+* - '|' for walls in vertical passages
+* - '•' for joints between passages
+* It returns the radar map as a string.
+*
+* @param cells: &Vec<RadarCell> - The radar cells (9 cells)<br>
+* @param h_passages: &Vec<Boundary> - The horizontal passages (12 passages)<br>
+* @param v_passages: &Vec<Boundary> - The vertical passages (12 passages)<br>
+ */
+fn get_radar_map_as_string(
+    cells: &Vec<Vec<RadarCell>>,
+    h_passages: &Vec<Boundary>,
+    v_passages: &Vec<Boundary>,
+) -> String {
+    // Symbol mappings
+    let symboles_cellules = std::collections::HashMap::from([
+        (true, '#'),
+        (false, ' '),
+    ]);
+
+    let joint = '•';
+
+    let symboles_passages_horizontal = std::collections::HashMap::from([
+        (Boundary::Undefined, '#'),
+        (Boundary::Open, ' '),
+        (Boundary::Wall, '-'),
+    ]);
+
+    let symboles_passages_vertical = std::collections::HashMap::from([
+        (Boundary::Undefined, '#'),
+        (Boundary::Open, ' '),
+        (Boundary::Wall, '|'),
+    ]);
+
+    let mut carte: Vec<String> = Vec::new();
+
+    // Convert v_passages to a 2D array (3x4)
+    let mut passages_verticaux = vec![vec![Boundary::Undefined; 4]; 3];
+    for i in 0..3 {
+        for j in 0..4 {
+            passages_verticaux[i][j] = v_passages[i * 4 + j].clone();
+        }
+    }
+
+    // Convert h_passages to a 2D array (4x3)
+    let mut passages_horizontaux = vec![vec![Boundary::Undefined; 3]; 4];
+    for i in 0..4 {
+        for j in 0..3 {
+            passages_horizontaux[i][j] = h_passages[i * 3 + j].clone();
+        }
+    }
+
+    // Construct the radar map line by line
+    // seven iterations for each line
+    for i in 0..7 {
+        // Line of cells
+        let mut ligne = String::new();
+
+        if (i % 2 == 0) {
+            // seven iterations for each line
+            for j in 0..7 {
+
+                // if j is not pair check if joint char is needed '•'
+                if j % 2 != 0 {
+                    ligne.push(*symboles_passages_horizontal.get(&passages_horizontaux[i / 2][j / 2]).unwrap());
+                } else {
+                    // to check if joint is needed ->
+                    // if first half of the line, check the passage after, if open '•' else '#'
+                    // if second half of the line, check the passage before, if open '•' else '#'
+                    if j < 3 {
+                        ligne.push(
+                            if passages_horizontaux[i / 2][j / 2] != Boundary::Undefined
+                                || (j != 0 && passages_horizontaux[i / 2][(j - 1) / 2] != Boundary::Undefined) { joint } else { '#' }
+                        );
+                    } else {
+                        ligne.push(
+                            if passages_horizontaux[i / 2][(j - 1) / 2] != Boundary::Undefined
+                                || (j != 6 && passages_horizontaux[i / 2][j / 2] != Boundary::Undefined) { joint } else { '#' }
+                        );
+                    }
+                }
+            }
         } else {
-            match cell.entity {
-                Entity::Ally => 'A',
-                Entity::Enemy => 'E',
-                Entity::Monster => 'M',
-                Entity::None => ' ',
+
+            // Line of vertical passages
+            // seven iterations for each line
+            for j in 0..7 {
+                // if j is not pair place the value of the vertical passage / 2
+                // else place the value of the cell / 2
+                if j % 2 == 0 {
+                    ligne.push(*symboles_passages_vertical.get(&passages_verticaux[(i - 1) / 2][j / 2]).unwrap());
+                } else {
+                    ligne.push(*symboles_cellules.get(&cells[i / 2][j / 2].is_undefined).unwrap());
+                }
             }
         }
-    };
 
-    // Symboles pour les passages
-    let passage_symbol = |passage: &Boundary, horizontal: bool| match passage {
-        Boundary::Undefined => '?',
-        Boundary::Open => ' ',
-        Boundary::Wall => if horizontal { '-' } else { '|' },
-        Boundary::Error => '!',
-    };
-
-    // Créer une grille 7x7 pour représenter le radar
-    let mut grid = vec![vec![' '; 7]; 7];
-
-    // Positions des cellules
-    let cell_positions = [
-        (1, 1), (1, 3), (1, 5),
-        (3, 1), (3, 3), (3, 5),
-        (5, 1), (5, 3), (5, 5),
-    ];
-
-    // Remplir les cellules
-    for (i, &(row, col)) in cell_positions.iter().enumerate() {
-        let cell = &cells[i];
-        grid[row][col] = cell_symbols(cell);
+        carte.push(ligne);
     }
 
-    // Positions des passages horizontaux
-    let h_pass_positions = [
-        (0, 1), (0, 3), (0, 5),
-        (2, 1), (2, 3), (2, 5),
-        (4, 1), (4, 3), (4, 5),
-        (6, 1), (6, 3), (6, 5),
-    ];
-
-    // Remplir les passages horizontaux
-    for (i, &(row, col)) in h_pass_positions.iter().enumerate() {
-        let passage = &h_passages[i];
-        grid[row][col] = passage_symbol(passage, true);
-    }
-
-    // Positions des passages verticaux
-    let v_pass_positions = [
-        (1, 0), (1, 2), (1, 4), (1, 6),
-        (3, 0), (3, 2), (3, 4), (3, 6),
-        (5, 0), (5, 2), (5, 4), (5, 6),
-    ];
-
-    // Remplir les passages verticaux
-    for (i, &(row, col)) in v_pass_positions.iter().enumerate() {
-        let passage = &v_passages[i];
-        grid[row][col] = passage_symbol(passage, false);
-    }
-
-    // Afficher la carte
-    println!("Radar Map:");
-    for row in grid {
-        let line: String = row.into_iter().collect();
-        println!("{}", line);
-    }
+    // return map joined by return char '\n' and a return char at the end
+    carte.join("\n") + "\n"
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -560,34 +620,76 @@ mod tests {
 
     #[test]
     fn test_parse_passages_mixed() {
-        let data = [0b11001100, 0b00110011, 0b11110000];
+        let data = [0b01001000, 0b00010010, 0b10010000];
         let passages = parse_passages(&data, 12, "horizontal");
+        let passagesV2 = parse_passages(&data, 12, "vertical");
+        let data2 = [0b00100000, 0b01000110, 0b00010010];
+        parse_passages(&data2, 12, "vertical");
+        // 10010000 00010010 01001000
+        // ["10010000", "00010010", "01001000"]
         let expected = vec![
-            Boundary::Error, // bits 23-22: 11 (value 3)
-            Boundary::Undefined, // bits 21-20: 00 (value 0)
-            Boundary::Error, // bits 19-18: 11 (value 3)
-            Boundary::Undefined, // bits 17-16: 00 (value 0)
-            Boundary::Undefined, // bits 21-20: 00 (value 0)
-            Boundary::Error, // bits 19-18: 11 (value 3)
-            Boundary::Undefined, // bits 17-16: 00 (value 0)
-            Boundary::Error, // bits 15-14: 11 (value 3)
-            Boundary::Error, // bits 13-12: 11 (value 3)
-            Boundary::Error, // bits 11-10: 11 (value 3)
-            Boundary::Undefined, // bits 9-8:   00 (value 0)
-            Boundary::Undefined, // bits 7-6:   00 (value 0)
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Undefined
         ];
-        // fixme
-        // assert_eq!(passages, expected);
+        assert_eq!(passagesV2, expected);
     }
 
     #[test]
-    fn test_parse_passages_invalid_values() {
-        let data = [0xFF, 0xFF, 0xFF]; // Tous les bits à 1 (valeur 3)
+    fn test_parse_passage_real_case() {
+        //00100000 01000110 00010010
+        let data = [0b00100000, 0b01000110, 0b00010010];
+        // inverted should be 00010010 01000110 00100000
         let passages = parse_passages(&data, 12, "horizontal");
-        assert_eq!(passages.len(), 12);
-        for passage in passages {
-            assert_eq!(passage, Boundary::Error);
-        }
+        let expected = vec![
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined
+        ];
+
+        assert_eq!(passages, expected);
+    }
+
+    #[test]
+    fn test_parse_passages_real_case() {
+        // 10000000 10011000 00101000
+        let data = [0b10000000, 0b10011000, 0b00101000];
+        let passages = parse_passages(&data, 12, "horizontal");
+        // inverted should be 00101000 10011000 10000000
+        let expected = vec![
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Undefined,
+        ];
+
+        assert_eq!(passages, expected);
     }
 
     #[test]
@@ -595,46 +697,61 @@ mod tests {
         // Exemple avec une séquence spécifique
         let data = [0b00011011, 0b01100110, 0b11001100];
         // inverse bit (little endian to big endian)
-        // 0b 11 01 10 00 01 10 01 10 11 01 10 00
+        // 11001100 01100110 00011011
         let passages = parse_passages(&data, 12, "horizontal");
         let expected = vec![
-            Boundary::Error,
-            Boundary::Open,
-            Boundary::Wall,
+            Boundary::BoundaryError,
+            Boundary::Undefined,
+            Boundary::BoundaryError,
             Boundary::Undefined,
             Boundary::Open,
             Boundary::Wall,
             Boundary::Open,
             Boundary::Wall,
-            Boundary::Error,
+            Boundary::Undefined,
             Boundary::Open,
             Boundary::Wall,
-            Boundary::Undefined,
+            Boundary::BoundaryError,
         ];
-        // fixme
-        // assert_eq!(passages, expected);
+        assert_eq!(passages, expected);
+    }
+
+    #[test]
+    fn test_parse_passages_invalid_values() {
+        let data = [0b11111111, 0b11111111, 0b11111111];
+        let passages = parse_passages(&data, 12, "horizontal");
+        assert_eq!(passages.len(), 12);
+        let expected = vec![
+            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
+            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
+            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
+        ];
+        assert_eq!(passages, expected);
     }
 
     #[test]
     fn test_parse_message_without_error() {
         let data = [0b00011010, 0b01100110, 0b10000100];
         let passages = parse_passages(&data, 12, "horizontal");
+        // inverted should be 10000100 01100110 00011010
         let expected = vec![
-            Boundary::Undefined, // bits 23-22: 00 (value 0)
-            Boundary::Open,      // bits 21-20: 01 (value 1)
-            Boundary::Wall,      // bits 19-18: 10 (value 2)
-            Boundary::Wall,     // bits 17-16: 11 (value 3)
-            Boundary::Open,      // bits 15-14: 01 (value 1)
-            Boundary::Wall,      // bits 13-12: 10 (value 2)
-            Boundary::Open,      // bits 11-10: 01 (value 1)
-            Boundary::Wall,      // bits 9-8:   10 (value 2)
-            Boundary::Wall,     // bits 7-6:   11 (value 3)
-            Boundary::Undefined, // bits 5-4:   00 (value 0)
-            Boundary::Open,     // bits 3-2:   11 (value 3)
-            Boundary::Undefined, // bits 1-0:   00 (value 0)
+            // first byte
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            // second byte
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Wall,
+            // third byte
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Wall
         ];
-        //fixme
-        // assert_eq!(passages, expected);
+        assert_eq!(passages, expected);
     }
 
     #[test]
@@ -644,10 +761,10 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
             Boundary::Open,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
@@ -680,10 +797,10 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
             Boundary::Open,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
@@ -732,8 +849,8 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
-            Boundary::Open,
             Boundary::Wall,
+            Boundary::Open,
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
@@ -767,8 +884,8 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
-            Boundary::Wall,
             Boundary::Open,
+            Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
@@ -786,11 +903,11 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
+            Boundary::Open,
             Boundary::Undefined,
-            Boundary::Open,
-            Boundary::Open,
             Boundary::Undefined,
             Boundary::Wall,
+            Boundary::Open,
             Boundary::Wall,
             Boundary::Undefined,
             Boundary::Undefined,
@@ -801,11 +918,11 @@ mod tests {
             Boundary::Open,
             Boundary::Open,
             Boundary::Wall,
-            Boundary::Open,
             Boundary::Undefined,
             Boundary::Wall,
             Boundary::Open,
             Boundary::Wall,
+            Boundary::Open,
             Boundary::Undefined,
             Boundary::Undefined,
             Boundary::Undefined,
@@ -816,6 +933,146 @@ mod tests {
         assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), false);
         assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), true);
         assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), true);
+    }
+
+
+    #[test]
+    fn test_print_map() {
+        // Passages horizontaux (en regroupant par 2 bits consécutifs):
+        //     Undefined, Open, Undefined (ligne 1),
+        // Wall, Open, Undefined (ligne 2),
+        // Open, Wall, Undefined (ligne 3),
+        // Wall, Undefined, Undefined (ligne 4).
+        //     Passages verticaux (en regroupant par 2 bits consécutifs):
+        //     Undefined, Wall, Wall, Undefined (ligne 1)
+        // Wall, Open, Wall, Undefined (ligne 2),
+        // Wall, Undefined, Undefined, Undefined (ligne 3).
+        //     Les cellules (une cellule par caractère hexa):
+        //     Undefined, Rien, Undefined (ligne 1),
+        // Rien, Rien (votre position), Undefined (ligne 2),
+        // Rien, Undefined, Undefined (ligne 3).
+
+        let cells = vec![
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+        ];
+
+        let horizontal_passages = vec![
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined,
+        ];
+
+        let vertical_passages = vec![
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Undefined,
+        ];
+
+        let expected = "\
+        ##• •##\n\
+        ##| |##\n\
+        •-• •##\n\
+        |   |##\n\
+        • •-•##\n\
+        | #####\n\
+        •-•####\n";
+
+        let twoD_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
+            .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
+            .collect(); // Collect into a Vec<Vec<RadarCell>>
+
+        let result = get_radar_map_as_string(&twoD_cells, &horizontal_passages, &vertical_passages);
+
+        assert_eq!(result, expected);
+    }
+
+
+    #[test]
+    fn test_print_map_straight_line() {
+        let cells = vec![
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
+            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+        ];
+
+        let horizontal_passages = vec![
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Undefined
+        ];
+
+        let vertical_passages = vec![
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Undefined,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Undefined
+        ];
+
+        let expected = "\
+        ##• •##\n\
+        ##| |##\n\
+        ##• •##\n\
+        ##| |##\n\
+        ##• •##\n\
+        ##| |##\n\
+        ##• •##\n";
+
+        let twoD_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
+            .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
+            .collect(); // Collect into a Vec<Vec<RadarCell>>
+
+        let result = get_radar_map_as_string(&twoD_cells, &horizontal_passages, &vertical_passages);
+
+        assert_eq!(result, expected);
     }
 }
 

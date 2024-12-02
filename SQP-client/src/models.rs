@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+/**
+ * The Direction enum represents the different directions the player can face.
+ */
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum Direction {
     Front,
@@ -8,36 +11,52 @@ pub(crate) enum Direction {
     Right,
 }
 
-
 /**
- * The RegisterTeam struct represents the content of the RegisterTeam message.
- * It contains the team name.
+ * The turn_right function turns the player to the right.
+ *
+ * @param current_direction: &Direction - The current direction of the player
+ * @return Direction - The new direction after turning right
  */
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct RegisterTeam {
-    pub(crate) name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) struct SubscribePlayer {
-    pub(crate) name: String,
-    pub(crate) registration_token: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct Action {
-    pub(crate) MoveTo: Direction,
+fn turn_right(current_direction: &Direction) -> Direction {
+    match current_direction {
+        Direction::Front => Direction::Right,
+        Direction::Right => Direction::Back,
+        Direction::Back => Direction::Left,
+        Direction::Left => Direction::Front,
+    }
 }
 
 /**
- * The message enum represents the different types of messages that can be sent to the server.
- * Each message type is represented by a struct.
+ * The turn_left function turns the player to the left.
+ *
+ * @param current_direction: &Direction - The current direction of the player
+ * @return Direction - The new direction after turning left
  */
-#[derive(Serialize, Deserialize, Debug)]
-pub(crate) enum Message {
-    #[serde(rename_all = "camelCase")]
-    RegisterTeam(RegisterTeam),
-    SubscribePlayer(SubscribePlayer),
-    Action(Action),
+pub(crate) fn turn_left(current_direction: &Direction) -> Direction {
+    match current_direction {
+        Direction::Front => Direction::Left,
+        Direction::Left => Direction::Back,
+        Direction::Back => Direction::Right,
+        Direction::Right => Direction::Front,
+    }
 }
+
+/**
+ * The move_forward function moves the player forward.
+ *
+ * @param current_direction: &Direction - The current direction of the player
+ * @return Direction - The new direction after moving forward
+ */
+impl PartialEq for &Direction {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Direction::Front, Direction::Front) => true,
+            (Direction::Right, Direction::Right) => true,
+            (Direction::Back, Direction::Back) => true,
+            (Direction::Left, Direction::Left) => true,
+            _ => false,
+        }
+    }
+}
+
+

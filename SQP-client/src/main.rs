@@ -4,9 +4,10 @@ mod player;
 mod models;
 mod server_utils;
 mod decoder;
+mod request_models;
 
-use models::{Action, Direction, Message, RegisterTeam, SubscribePlayer};
-use player::player_thread;
+use player::start_player_thread;
+use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::net::TcpStream;
 use std::{env, io, thread};
@@ -16,6 +17,7 @@ fn main() -> io::Result<()> {
     // Step 1: Get server address from command line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
+        println!("Usage: worker <server_address>");
         eprintln!("Usage: worker <server_address>");
         std::process::exit(1);
     }
@@ -59,9 +61,9 @@ fn main() -> io::Result<()> {
 
 
     // Step 5: Spawn threads for each player
-    let players = ["Nino", "Paul", "Loriane"];
+    // let players = ["Nino", "Paul", "Loriane"];
     // fixme only 1 player for testing
-    // let players = ["Nino"];
+    let players = ["Nino"];
     let mut handles = vec![];
     for player in players.iter() {
         let player_name = player.to_string();
@@ -71,7 +73,7 @@ fn main() -> io::Result<()> {
         handles.push(thread::Builder::new()
             .name(player_name.clone())
             .spawn(move || {
-                player_thread(player_name, registration_token, server_address)
+                start_player_thread(player_name, registration_token, server_address)
             })
             .expect("Failed to spawn player thread")
         );
