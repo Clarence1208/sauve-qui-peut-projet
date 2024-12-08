@@ -1,17 +1,16 @@
 extern crate core;
 
-mod player;
-mod models;
-mod server_utils;
 mod decoder;
+mod models;
+mod player;
 mod request_models;
+mod server_utils;
 
 use player::start_player_thread;
 use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::net::TcpStream;
 use std::{env, io, thread};
-
 
 fn main() -> io::Result<()> {
     // Step 1: Get server address from command line arguments
@@ -44,12 +43,10 @@ fn main() -> io::Result<()> {
     send_message(&mut team_stream, &register_team_message)?;
     println!("Registered team: {}", team_name);
 
-
     // Step 4: Receive the registration token
     let response = receive_message(&mut team_stream)?;
     println!("Server response: {}", response);
     println!("Raw server response: {:?}", response);
-
 
     eprintln!("Parsing token from response");
     if response.contains("AlreadyRegistered") {
@@ -59,7 +56,6 @@ fn main() -> io::Result<()> {
 
     let registration_token = parse_token_from_response(&response)?;
 
-
     // Step 5: Spawn threads for each player
     let players = ["Nino", "Paul"];
     let mut handles = vec![];
@@ -68,12 +64,11 @@ fn main() -> io::Result<()> {
         let registration_token = registration_token.clone();
         let server_address = server_address.clone();
         // Spawn a new thread for each player, name the thread with the player's name
-        handles.push(thread::Builder::new()
-            .name(player_name.clone())
-            .spawn(move || {
-                start_player_thread(player_name, registration_token, server_address)
-            })
-            .expect("Failed to spawn player thread")
+        handles.push(
+            thread::Builder::new()
+                .name(player_name.clone())
+                .spawn(move || start_player_thread(player_name, registration_token, server_address))
+                .expect("Failed to spawn player thread"),
         );
     }
 

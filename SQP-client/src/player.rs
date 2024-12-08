@@ -106,8 +106,13 @@ struct RadarCell {
  * @param registration_token: String - The registration token for the player
  * @param server_address: String - The address of the server
  */
-pub(crate) fn start_player_thread(player_name: String, registration_token: String, server_address: String) {
-    let mut player_stream = TcpStream::connect(server_address).expect("Failed to connect to server");
+pub(crate) fn start_player_thread(
+    player_name: String,
+    registration_token: String,
+    server_address: String,
+) {
+    let mut player_stream =
+        TcpStream::connect(server_address).expect("Failed to connect to server");
     println!("Connected for player: {}", player_name);
 
     // Subscribe the player
@@ -115,10 +120,12 @@ pub(crate) fn start_player_thread(player_name: String, registration_token: Strin
         name: player_name.clone(),
         registration_token: registration_token.clone(),
     });
-    send_message(&mut player_stream, &subscribe_player_message).expect("Failed to subscribe player");
+    send_message(&mut player_stream, &subscribe_player_message)
+        .expect("Failed to subscribe player");
     println!("Subscribed player: {}", player_name);
 
-    let response = receive_message(&mut player_stream).expect("Failed to receive subscription response");
+    let response =
+        receive_message(&mut player_stream).expect("Failed to receive subscription response");
     if !response.contains("Ok") {
         eprintln!("Failed to subscribe player: {}", response);
         return;
@@ -127,7 +134,10 @@ pub(crate) fn start_player_thread(player_name: String, registration_token: Strin
 
     // get the next response from the server that contains the radar view
     let response = receive_message(&mut player_stream).expect("Failed to receive radar response");
-    println!("Player {} received radar response: {}", player_name, response);
+    println!(
+        "Player {} received radar response: {}",
+        player_name, response
+    );
 
     search_for_exit(player_name, player_stream, response);
 
@@ -143,12 +153,14 @@ pub(crate) fn start_player_thread(player_name: String, registration_token: Strin
  * @param player_stream: TcpStream - The TCP stream for the player
  * @param initial_radar_response: String - The initial radar response from the server
  */
-fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initial_radar_response: String) {
-
+fn search_for_exit(
+    player_name: String,
+    mut player_stream: TcpStream,
+    mut initial_radar_response: String,
+) {
     // Parse the radar to get the initial state of the labyrinth
-    let (mut cells,
-        mut horizontal_passages,
-        mut vertical_passages) = parse_radar_response(&initial_radar_response);
+    let (mut cells, mut horizontal_passages, mut vertical_passages) =
+        parse_radar_response(&initial_radar_response);
     // Initial player direction
     let mut current_direction = Direction::Right; // allways try to go right first
 
@@ -163,17 +175,28 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
             MoveTo: current_direction.clone(),
         });
         send_message(&mut player_stream, &action_message).expect("Failed to send action");
-        println!("Player {} sent action: {:?}", player_name, current_direction);
+        println!(
+            "Player {} sent action: {:?}",
+            player_name, current_direction
+        );
 
         // Receive the server's response to the action
-        let mut action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
-        println!("Player {} received response: {}", player_name, action_response);
+        let mut action_response =
+            receive_message(&mut player_stream).expect("Failed to receive action response");
+        println!(
+            "Player {} received response: {}",
+            player_name, action_response
+        );
 
         if action_response.contains("Hint") {
             println!("Player {} found a hint!", player_name);
             // get next message from server to get the radar view
-            action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
-            println!("Player {} received response: {}", player_name, action_response);
+            action_response =
+                receive_message(&mut player_stream).expect("Failed to receive action response");
+            println!(
+                "Player {} received response: {}",
+                player_name, action_response
+            );
         }
 
         if action_response.contains("Challenge") {
@@ -182,10 +205,9 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
             resolve_challenge(&mut player_stream, &action_response);
 
             // get next message from server to get the radar view
-            action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
-
+            action_response =
+                receive_message(&mut player_stream).expect("Failed to receive action response");
         }
-
 
         player_stream.flush().expect("Failed to flush stream");
 
@@ -196,7 +218,6 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
             return;
         }
 
-
         // parse and update cells, horizontal and vertical passages
         (cells, horizontal_passages, vertical_passages) = parse_radar_response(&action_response);
         current_direction = Direction::Right; // Reset the direction to right
@@ -204,11 +225,13 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
         // timeout 1/100 of a second
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-
         // Check if movement was blocked
         if action_response.contains("CannotPassThroughWall") {
             // throw error
-            eprintln!("Player {} hit a wall, turning to {:?}", player_name, current_direction);
+            eprintln!(
+                "Player {} hit a wall, turning to {:?}",
+                player_name, current_direction
+            );
         }
     }
 }
@@ -219,8 +242,6 @@ fn resolve_challenge(player_stream: &mut TcpStream, challenge: &String) {
     // pause the player thread to test
 
     std::thread::sleep(std::time::Duration::from_secs(100));
-
-
 }
 
 // fixme remove, only for testing
@@ -230,7 +251,9 @@ fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
     while true {
         // 1 = front, 2 = right, 3 = back, 4 = left
         let mut input = String::new();
-        std::io::stdin().read_line(&mut input).expect("Failed to read line");
+        std::io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read line");
         let input = input.trim();
         match input {
             "1" => current_direction = Direction::Front,
@@ -244,11 +267,18 @@ fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
             MoveTo: current_direction.clone(),
         });
         send_message(&mut player_stream, &action_message).expect("Failed to send action");
-        println!("Player {} sent action: {:?}", player_name, current_direction);
+        println!(
+            "Player {} sent action: {:?}",
+            player_name, current_direction
+        );
 
         // Receive the server's response to the action
-        let action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
-        println!("Player {} received response: {}", player_name, action_response);
+        let action_response =
+            receive_message(&mut player_stream).expect("Failed to receive action response");
+        println!(
+            "Player {} received response: {}",
+            player_name, action_response
+        );
 
         player_stream.flush().expect("Failed to flush stream");
 
@@ -278,7 +308,10 @@ fn is_direction_open(
     };
 
     // log for debugging
-    println!("Checking passage for direction {:?} (index {})", next_direction, passage_index);
+    println!(
+        "Checking passage for direction {:?} (index {})",
+        next_direction, passage_index
+    );
 
     // if the direction is front or back log the horizontal passages
     if next_direction == &Direction::Front || next_direction == &Direction::Back {
@@ -315,10 +348,13 @@ fn is_direction_open(
  * It extracts the radar data from the response, decodes the data, and parses the cells, horizontal passages, and vertical passages.
  * It returns a tuple containing the cells, horizontal passages, and vertical passages.
  */
-pub(crate) fn parse_radar_response(response: &str) -> (Vec<RadarCell>, Vec<Boundary>, Vec<Boundary>) {
+pub(crate) fn parse_radar_response(
+    response: &str,
+) -> (Vec<RadarCell>, Vec<Boundary>, Vec<Boundary>) {
     if response.contains("CannotPassThroughWall")
         || response.contains("FoundExit")
-        || response.contains("Hint") {
+        || response.contains("Hint")
+    {
         return (vec![], vec![], vec![]);
     }
 
@@ -374,12 +410,13 @@ pub(crate) fn parse_radar_response(response: &str) -> (Vec<RadarCell>, Vec<Bound
         println!("  Cell {}: {:?}", i, cell);
     }
 
-    let two_d_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
-        .map(|chunk| chunk.to_vec())
-        .collect();
+    let two_d_cells: Vec<Vec<RadarCell>> = cells.chunks(3).map(|chunk| chunk.to_vec()).collect();
 
     // print radar map
-    println!("{}", get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages));
+    println!(
+        "{}",
+        get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages)
+    );
 
     (cells, horizontal_passages, vertical_passages)
 }
@@ -401,11 +438,13 @@ fn parse_passages(bytes: &[u8], num_passages: usize, passage_type: &str) -> Vec<
 
     // Log bytes before rearrangement
     println!("{} original bytes (hex): {:02X?}", passage_type, bytes);
-    println!("{} original bytes (bin): {:?}",
-             passage_type,
-             bytes.iter()
-                 .map(|b| format!("{:08b}", b))
-                 .collect::<Vec<String>>()
+    println!(
+        "{} original bytes (bin): {:?}",
+        passage_type,
+        bytes
+            .iter()
+            .map(|b| format!("{:08b}", b))
+            .collect::<Vec<String>>()
     );
 
     // Rearrange bytes to extract passages
@@ -413,12 +452,17 @@ fn parse_passages(bytes: &[u8], num_passages: usize, passage_type: &str) -> Vec<
 
     // Log bytes after rearrangement
     let bytes_be = [(bits >> 16) as u8, (bits >> 8) as u8, bits as u8];
-    println!("{} bytes after rearrangement (big endian order): {:02X?}", passage_type, bytes_be);
-    println!("{} bytes after rearrangement (big endian order, bin): {:?}",
-             passage_type,
-             bytes_be.iter()
-                 .map(|b| format!("{:08b}", b))
-                 .collect::<Vec<String>>()
+    println!(
+        "{} bytes after rearrangement (big endian order): {:02X?}",
+        passage_type, bytes_be
+    );
+    println!(
+        "{} bytes after rearrangement (big endian order, bin): {:?}",
+        passage_type,
+        bytes_be
+            .iter()
+            .map(|b| format!("{:08b}", b))
+            .collect::<Vec<String>>()
     );
 
     // Extract passages from bits, 2 bits at a time
@@ -480,7 +524,11 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
             _ => Entity::None,
         };
 
-        cells.push(RadarCell { is_undefined: false, item, entity });
+        cells.push(RadarCell {
+            is_undefined: false,
+            item,
+            entity,
+        });
     }
 
     cells
@@ -507,10 +555,7 @@ fn get_radar_map_as_string(
     v_passages: &Vec<Boundary>,
 ) -> String {
     // Symbol mappings
-    let symboles_cellules = std::collections::HashMap::from([
-        (true, '#'),
-        (false, ' '),
-    ]);
+    let symboles_cellules = std::collections::HashMap::from([(true, '#'), (false, ' ')]);
 
     let joint = '•';
 
@@ -553,10 +598,13 @@ fn get_radar_map_as_string(
         if (i % 2 == 0) {
             // seven iterations for each line
             for j in 0..7 {
-
                 // if j is not pair check if joint char is needed '•'
                 if j % 2 != 0 {
-                    ligne.push(*symboles_passages_horizontal.get(&passages_horizontaux[i / 2][j / 2]).unwrap());
+                    ligne.push(
+                        *symboles_passages_horizontal
+                            .get(&passages_horizontaux[i / 2][j / 2])
+                            .unwrap(),
+                    );
                 } else {
                     // to check if joint is needed ->
                     // if first half of the line, check the passage after, if open '•' else '#'
@@ -564,27 +612,47 @@ fn get_radar_map_as_string(
                     if j < 3 {
                         ligne.push(
                             if passages_horizontaux[i / 2][j / 2] != Boundary::Undefined
-                                || (j != 0 && passages_horizontaux[i / 2][(j - 1) / 2] != Boundary::Undefined) { joint } else { '#' }
+                                || (j != 0
+                                    && passages_horizontaux[i / 2][(j - 1) / 2]
+                                        != Boundary::Undefined)
+                            {
+                                joint
+                            } else {
+                                '#'
+                            },
                         );
                     } else {
                         ligne.push(
                             if passages_horizontaux[i / 2][(j - 1) / 2] != Boundary::Undefined
-                                || (j != 6 && passages_horizontaux[i / 2][j / 2] != Boundary::Undefined) { joint } else { '#' }
+                                || (j != 6
+                                    && passages_horizontaux[i / 2][j / 2] != Boundary::Undefined)
+                            {
+                                joint
+                            } else {
+                                '#'
+                            },
                         );
                     }
                 }
             }
         } else {
-
             // Line of vertical passages
             // seven iterations for each line
             for j in 0..7 {
                 // if j is not pair place the value of the vertical passage / 2
                 // else place the value of the cell / 2
                 if j % 2 == 0 {
-                    ligne.push(*symboles_passages_vertical.get(&passages_verticaux[(i - 1) / 2][j / 2]).unwrap());
+                    ligne.push(
+                        *symboles_passages_vertical
+                            .get(&passages_verticaux[(i - 1) / 2][j / 2])
+                            .unwrap(),
+                    );
                 } else {
-                    ligne.push(*symboles_cellules.get(&cells[i / 2][j / 2].is_undefined).unwrap());
+                    ligne.push(
+                        *symboles_cellules
+                            .get(&cells[i / 2][j / 2].is_undefined)
+                            .unwrap(),
+                    );
                 }
             }
         }
@@ -595,7 +663,6 @@ fn get_radar_map_as_string(
     // return map joined by return char '\n' and a return char at the end
     carte.join("\n") + "\n"
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -659,7 +726,7 @@ mod tests {
             Boundary::Open,
             Boundary::Undefined,
             Boundary::Wall,
-            Boundary::Undefined
+            Boundary::Undefined,
         ];
         assert_eq!(passagesV2, expected);
     }
@@ -682,7 +749,7 @@ mod tests {
             Boundary::Undefined,
             Boundary::Wall,
             Boundary::Undefined,
-            Boundary::Undefined
+            Boundary::Undefined,
         ];
 
         assert_eq!(passages, expected);
@@ -742,9 +809,18 @@ mod tests {
         let passages = parse_passages(&data, 12, "horizontal");
         assert_eq!(passages.len(), 12);
         let expected = vec![
-            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
-            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
-            Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError, Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
+            Boundary::BoundaryError,
         ];
         assert_eq!(passages, expected);
     }
@@ -769,7 +845,7 @@ mod tests {
             Boundary::Undefined,
             Boundary::Open,
             Boundary::Wall,
-            Boundary::Wall
+            Boundary::Wall,
         ];
         assert_eq!(passages, expected);
     }
@@ -806,11 +882,22 @@ mod tests {
             Boundary::Wall,
         ];
 
-        assert_eq!(is_direction_open(&Direction::Front, &h_passages, &v_passages), true);
-        assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), false);
-
+        assert_eq!(
+            is_direction_open(&Direction::Front, &h_passages, &v_passages),
+            true
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Right, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Back, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Left, &h_passages, &v_passages),
+            false
+        );
 
         let h_passages = vec![
             Boundary::Wall,
@@ -842,46 +929,22 @@ mod tests {
             Boundary::Wall,
         ];
 
-        assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), true);
-        assert_eq!(is_direction_open(&Direction::Front, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), false);
-
-
-        let h_passages = vec![
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-        ];
-
-        let v_passages = vec![
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Open,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-            Boundary::Wall,
-        ];
-
-        assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), true);
-        assert_eq!(is_direction_open(&Direction::Front, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), false);
+        assert_eq!(
+            is_direction_open(&Direction::Back, &h_passages, &v_passages),
+            true
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Front, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Right, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Left, &h_passages, &v_passages),
+            false
+        );
 
         let h_passages = vec![
             Boundary::Wall,
@@ -904,6 +967,53 @@ mod tests {
             Boundary::Wall,
             Boundary::Wall,
             Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+        ];
+
+        assert_eq!(
+            is_direction_open(&Direction::Right, &h_passages, &v_passages),
+            true
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Front, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Back, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Left, &h_passages, &v_passages),
+            false
+        );
+
+        let h_passages = vec![
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+        ];
+
+        let v_passages = vec![
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
+            Boundary::Wall,
             Boundary::Open,
             Boundary::Wall,
             Boundary::Wall,
@@ -913,11 +1023,22 @@ mod tests {
             Boundary::Wall,
         ];
 
-        assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), true);
-        assert_eq!(is_direction_open(&Direction::Front, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), false);
-
+        assert_eq!(
+            is_direction_open(&Direction::Left, &h_passages, &v_passages),
+            true
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Front, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Right, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Back, &h_passages, &v_passages),
+            false
+        );
 
         let h_passages = vec![
             Boundary::Wall,
@@ -949,12 +1070,23 @@ mod tests {
             Boundary::Undefined,
         ];
 
-        assert_eq!(is_direction_open(&Direction::Front, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Right, &h_passages, &v_passages), false);
-        assert_eq!(is_direction_open(&Direction::Back, &h_passages, &v_passages), true);
-        assert_eq!(is_direction_open(&Direction::Left, &h_passages, &v_passages), true);
+        assert_eq!(
+            is_direction_open(&Direction::Front, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Right, &h_passages, &v_passages),
+            false
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Back, &h_passages, &v_passages),
+            true
+        );
+        assert_eq!(
+            is_direction_open(&Direction::Left, &h_passages, &v_passages),
+            true
+        );
     }
-
 
     #[test]
     fn test_print_map() {
@@ -973,15 +1105,51 @@ mod tests {
         // Rien, Undefined, Undefined (ligne 3).
 
         let cells = vec![
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
         ];
 
         let horizontal_passages = vec![
@@ -1023,7 +1191,8 @@ mod tests {
         | #####\n\
         •-•####\n";
 
-        let twoD_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
+        let twoD_cells: Vec<Vec<RadarCell>> = cells
+            .chunks(3)
             .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
             .collect(); // Collect into a Vec<Vec<RadarCell>>
 
@@ -1032,19 +1201,54 @@ mod tests {
         assert_eq!(result, expected);
     }
 
-
     #[test]
     fn test_print_map_straight_line() {
         let cells = vec![
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: false, item: Item::None, entity: Entity::None },
-            RadarCell { is_undefined: true, item: Item::None, entity: Entity::None },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: false,
+                item: Item::None,
+                entity: Entity::None,
+            },
+            RadarCell {
+                is_undefined: true,
+                item: Item::None,
+                entity: Entity::None,
+            },
         ];
 
         let horizontal_passages = vec![
@@ -1059,7 +1263,7 @@ mod tests {
             Boundary::Undefined,
             Boundary::Undefined,
             Boundary::Open,
-            Boundary::Undefined
+            Boundary::Undefined,
         ];
 
         let vertical_passages = vec![
@@ -1074,7 +1278,7 @@ mod tests {
             Boundary::Undefined,
             Boundary::Wall,
             Boundary::Wall,
-            Boundary::Undefined
+            Boundary::Undefined,
         ];
 
         let expected = "\
@@ -1086,7 +1290,8 @@ mod tests {
         ##| |##\n\
         ##• •##\n";
 
-        let twoD_cells: Vec<Vec<RadarCell>> = cells.chunks(3)
+        let twoD_cells: Vec<Vec<RadarCell>> = cells
+            .chunks(3)
             .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
             .collect(); // Collect into a Vec<Vec<RadarCell>>
 
@@ -1095,4 +1300,3 @@ mod tests {
         assert_eq!(result, expected);
     }
 }
-

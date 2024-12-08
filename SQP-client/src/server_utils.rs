@@ -1,7 +1,7 @@
+use serde::Serialize;
 use std::io;
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use serde::Serialize;
 
 /**
  * Send a message to the server
@@ -20,23 +20,25 @@ pub fn send_message(stream: &mut TcpStream, message: &impl Serialize) -> io::Res
 
     // Send the message length (u32 in little-endian)
     let message_length = serialized_message.len() as u32;
-    stream.write_all(&message_length.to_le_bytes()).map_err(|e| {
-        eprintln!("Failed to send message length: {}", e);
-        e
-    })?;
+    stream
+        .write_all(&message_length.to_le_bytes())
+        .map_err(|e| {
+            eprintln!("Failed to send message length: {}", e);
+            e
+        })?;
     println!("Sent message length: {}", message_length);
 
     // Send the JSON message
-    stream.write_all(serialized_message.as_bytes()).map_err(|e| {
-        eprintln!("Failed to send message payload: {}", e);
-        e
-    })?;
+    stream
+        .write_all(serialized_message.as_bytes())
+        .map_err(|e| {
+            eprintln!("Failed to send message payload: {}", e);
+            e
+        })?;
     println!("Message sent successfully: {}", serialized_message);
 
     Ok(())
 }
-
-
 
 pub fn receive_message(stream: &mut TcpStream) -> io::Result<String> {
     // Read the length of the incoming message
@@ -65,15 +67,19 @@ pub fn receive_message(stream: &mut TcpStream) -> io::Result<String> {
         }
     }
 
-    let message = String::from_utf8(message_buffer)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 message received"))?;
+    let message = String::from_utf8(message_buffer).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF-8 message received")
+    })?;
     Ok(message)
 }
 
-
 pub fn parse_token_from_response(response: &str) -> io::Result<String> {
-    let registration_result: serde_json::Value =
-        serde_json::from_str(response).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Failed to parse server response"))?;
+    let registration_result: serde_json::Value = serde_json::from_str(response).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Failed to parse server response",
+        )
+    })?;
 
     registration_result["RegisterTeamResult"]["Ok"]["registration_token"]
         .as_str()

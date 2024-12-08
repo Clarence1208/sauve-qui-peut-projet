@@ -58,5 +58,3 @@ impl PartialEq for &Direction {
         }
     }
 }
-
-
