@@ -176,6 +176,16 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
             println!("Player {} received response: {}", player_name, action_response);
         }
 
+        if action_response.contains("Challenge") {
+            println!("Player {} found a challenge!", player_name);
+            // cannot move until challenge is solved
+            resolve_challenge(&mut player_stream, &action_response);
+
+            // get next message from server to get the radar view
+            action_response = receive_message(&mut player_stream).expect("Failed to receive action response");
+
+        }
+
 
         player_stream.flush().expect("Failed to flush stream");
 
@@ -201,6 +211,16 @@ fn search_for_exit(player_name: String, mut player_stream: TcpStream, mut initia
             eprintln!("Player {} hit a wall, turning to {:?}", player_name, current_direction);
         }
     }
+}
+
+fn resolve_challenge(player_stream: &mut TcpStream, challenge: &String) {
+    //todo!
+
+    // pause the player thread to test
+
+    std::thread::sleep(std::time::Duration::from_secs(100));
+
+
 }
 
 // fixme remove, only for testing
