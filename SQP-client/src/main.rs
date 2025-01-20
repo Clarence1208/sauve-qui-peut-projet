@@ -11,6 +11,10 @@ use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::net::TcpStream;
 use std::{env, io, thread};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
+static SECRET_MAP: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
 
 fn main() -> io::Result<()> {
     // Step 1: Get server address from command line arguments
@@ -31,6 +35,10 @@ fn main() -> io::Result<()> {
     // Step 2: Connect to the server
     let mut team_stream = TcpStream::connect(server_address)?;
     println!("Connected to server at {}", server_address);
+
+    // Initialize the global map
+    // fixme try RwLock instead of Mutex as the professor suggested
+    SECRET_MAP.set(Arc::new(Mutex::new(HashMap::new()))).unwrap();
 
     // Step 3: Register the team
     // let team_name = "Team NLCP";
@@ -57,7 +65,7 @@ fn main() -> io::Result<()> {
     let registration_token = parse_token_from_response(&response)?;
 
     // Step 5: Spawn threads for each player
-    let players = ["Nino", "Paul"];
+    let players = ["Nino", "Paul", "Loriane"];
     let mut handles = vec![];
     for player in players.iter() {
         let player_name = player.to_string();

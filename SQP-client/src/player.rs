@@ -1,17 +1,21 @@
 use crate::decoder::decode;
 use crate::models::{turn_left, Direction};
-use crate::request_models::{Action, Message, SubscribePlayer};
+use crate::request_models::{Action, Answer, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
-use log::log;
+use crate::SECRET_MAP;
+use log::{debug, error, info};
 use std::cmp::PartialEq;
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::io::Write;
 use std::net::TcpStream;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /**
  * The Boundary enum represents the different types of boundaries in the labyrinth.
  */
 #[derive(Debug, Clone, Eq, Hash)]
-enum Boundary {
+pub(crate) enum Boundary {
     Undefined,
     Open,
     Wall,
@@ -92,7 +96,7 @@ impl PartialEq for Item {
  * The entity represents the type of entity in the cell (None, Ally, Enemy, Monster).
  */
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
-struct RadarCell {
+pub(crate) struct RadarCell {
     is_undefined: bool,
     item: Item,
     entity: Entity,
@@ -156,7 +160,7 @@ pub(crate) fn start_player_thread(
 fn search_for_exit(
     player_name: String,
     mut player_stream: TcpStream,
-    mut initial_radar_response: String,
+    initial_radar_response: String,
 ) {
     // Parse the radar to get the initial state of the labyrinth
     let (mut cells, mut horizontal_passages, mut vertical_passages) =
@@ -171,9 +175,8 @@ fn search_for_exit(
             current_direction = turn_left(&current_direction);
         }
         // Send the current movement action
-        let action_message = Message::Action(Action {
-            MoveTo: current_direction.clone(),
-        });
+        let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
+
         send_message(&mut player_stream, &action_message).expect("Failed to send action");
         println!(
             "Player {} sent action: {:?}",
@@ -190,6 +193,8 @@ fn search_for_exit(
 
         if action_response.contains("Hint") {
             println!("Player {} found a hint!", player_name);
+            handle_hint(&player_name, &action_response);
+
             // get next message from server to get the radar view
             action_response =
                 receive_message(&mut player_stream).expect("Failed to receive action response");
@@ -202,11 +207,36 @@ fn search_for_exit(
         if action_response.contains("Challenge") {
             println!("Player {} found a challenge!", player_name);
             // cannot move until challenge is solved
-            resolve_challenge(&mut player_stream, &action_response);
+            resolve_challenge(&player_name, &mut player_stream, &action_response);
 
             // get next message from server to get the radar view
             action_response =
                 receive_message(&mut player_stream).expect("Failed to receive action response");
+            if (action_response.contains("RadarView")) {
+                // Log the challenge solution in projectRoot/log/challenge.log
+                let log_dir = "log";
+                if let Err(e) = std::fs::create_dir_all(log_dir) {
+                    error!("Failed to create log directory: {}", e);
+                    return;
+                }
+
+                let challenge_log_file = format!("{}/challenge.log", log_dir);
+                if let Err(e) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&challenge_log_file)
+                    .and_then(|mut file| {
+                        file.write_all(
+                            format!("Player {} successfully solved the challenge\n", player_name)
+                                .as_bytes(),
+                        )
+                    })
+                {
+                    error!("Failed to write challenge to {}: {}", challenge_log_file, e);
+                } else {
+                    info!("Challenge logged to {}", challenge_log_file);
+                }
+            }
         }
 
         player_stream.flush().expect("Failed to flush stream");
@@ -236,12 +266,118 @@ fn search_for_exit(
     }
 }
 
-fn resolve_challenge(player_stream: &mut TcpStream, challenge: &String) {
-    //todo!
+fn handle_hint(player_name: &String, hint: &String) {
+    // Log the hint in projectRoot/log/hint.log
+    debug!("Received a hint: {}", hint);
 
-    // pause the player thread to test
+    // Parse secret from hint if present
+    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(hint) {
+        if let Some(secret_val) = json_val["Hint"]["Secret"].as_u64() {
+            if let Some(map) = SECRET_MAP.get() {
+                let mut map = map.lock().unwrap();
+                map.insert(player_name.clone(), secret_val);
+                info!("Stored secret for player {}: {}", player_name, secret_val);
+            }
+        }
+    }
 
-    std::thread::sleep(std::time::Duration::from_secs(100));
+    let log_dir = "log";
+    if let Err(e) = std::fs::create_dir_all(log_dir) {
+        error!("Failed to create log directory: {}", e);
+        return;
+    }
+
+    let hint_log_file = format!("{}/hint.log", log_dir);
+    if let Err(e) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&hint_log_file)
+        .and_then(|mut file| {
+            file.write_all(format!("Player: {} found:{}\n", player_name, hint).as_bytes())
+        })
+    {
+        error!("Failed to write hint to {}: {}", hint_log_file, e);
+    } else {
+        info!("Hint logged to {}", hint_log_file);
+    }
+}
+
+fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challenge: &String) {
+    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(challenge) {
+        // Try to read "Modulo" first, if not present, try "SecretSumModulo"
+        let mod_val = json_val["Challenge"]["Modulo"]
+            .as_u64()
+            .or(json_val["Challenge"]["SecretSumModulo"].as_u64());
+
+        if let Some(mod_val) = mod_val {
+            // Now we have the modulo value from the challenge
+            if let Some(map) = SECRET_MAP.get() {
+                let map = map.lock().unwrap();
+                let secret_hints: Vec<&u64> = map
+                    .iter()
+                    // .filter(|(name, _)| *name != player_name)
+                    .map(|(_, secret)| secret)
+                    // log for debugging
+                    .inspect(|secret| println!("Secret: {}", secret))
+                    .collect();
+
+                // Calculate the sum of the secret hints
+                let sum_of_secret_hint: u128 = secret_hints.iter().map(|&hint| *hint as u128).sum();
+
+                let modulo_result = (sum_of_secret_hint % mod_val as u128) as u64;
+
+                println!(
+                    "Player {} resolving challenge with sum {} modulo {} = {}",
+                    player_name, sum_of_secret_hint, mod_val, modulo_result
+                );
+
+                // Construct solution message
+                let solution_message = Message::Action(Action::SolveChallenge(Answer {
+                    answer: modulo_result.to_string(),
+                }));
+
+                // Send the solution message
+                if let Err(e) = send_message(player_stream, &solution_message) {
+                    error!("Failed to send challenge solution: {}", e);
+                } else {
+                    info!(
+                        "Sent challenge solution for player {}: {}",
+                        player_name, modulo_result
+                    );
+
+                    // Log the challenge solution in projectRoot/log/challenge.log
+                    let log_dir = "log";
+                    if let Err(e) = std::fs::create_dir_all(log_dir) {
+                        error!("Failed to create log directory: {}", e);
+                        return;
+                    }
+
+                    let challenge_log_file = format!("{}/challenge.log", log_dir);
+                    if let Err(e) = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&challenge_log_file)
+                        .and_then(|mut file| {
+                            file.write_all(
+                                format!("Player: {} found:{}\n", player_name, challenge).as_bytes(),
+                            )
+                        })
+                    {
+                        error!("Failed to write challenge to {}: {}", challenge_log_file, e);
+                    } else {
+                        info!("Challenge logged to {}", challenge_log_file);
+                    }
+                }
+            }
+        } else {
+            error!(
+                "No 'Modulo' or 'SecretSumModulo' field found in challenge JSON: {}",
+                challenge
+            );
+        }
+    } else {
+        error!("Failed to parse challenge JSON: {}", challenge);
+    }
 }
 
 // fixme remove, only for testing
@@ -263,9 +399,8 @@ fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
             _ => println!("Invalid input"),
         }
 
-        let action_message = Message::Action(Action {
-            MoveTo: current_direction.clone(),
-        });
+        let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
+
         send_message(&mut player_stream, &action_message).expect("Failed to send action");
         println!(
             "Player {} sent action: {:?}",
@@ -370,7 +505,7 @@ pub(crate) fn parse_radar_response(
 
     if radar_data.is_empty() {
         println!("No radar data found in the response.");
-        !panic!("No radar data found in the response.");
+        panic!("No radar data found in the response.");
     }
 
     // Decode the radar data
@@ -383,7 +518,7 @@ pub(crate) fn parse_radar_response(
     // (3 bytes for horizontal passages, 3 bytes for vertical passages, 5 bytes for cells)
     if decoded_radar_data.len() != 11 {
         println!("Invalid radar data length: {}", decoded_radar_data.len());
-        !panic!("Invalid radar data length: {}", decoded_radar_data.len());
+        panic!("Invalid radar data length: {}", decoded_radar_data.len());
     }
 
     // Parse the horizontal passages (12 passages, 2 bits each)
@@ -473,7 +608,7 @@ fn parse_passages(bytes: &[u8], num_passages: usize, passage_type: &str) -> Vec<
             0 => Boundary::Undefined,
             1 => Boundary::Open,
             2 => Boundary::Wall,
-            _ => Boundary::BoundaryError, // Valeur non définie pour 0b11
+            _ => Boundary::BoundaryError, // Error value for 0b11
         };
         passages.push(passage);
     }
@@ -595,7 +730,7 @@ fn get_radar_map_as_string(
         // Line of cells
         let mut ligne = String::new();
 
-        if (i % 2 == 0) {
+        if i % 2 == 0 {
             // seven iterations for each line
             for j in 0..7 {
                 // if j is not pair check if joint char is needed '•'
@@ -708,8 +843,7 @@ mod tests {
     #[test]
     fn test_parse_passages_mixed() {
         let data = [0b01001000, 0b00010010, 0b10010000];
-        let passages = parse_passages(&data, 12, "horizontal");
-        let passagesV2 = parse_passages(&data, 12, "vertical");
+        let passages = parse_passages(&data, 12, "vertical");
         let data2 = [0b00100000, 0b01000110, 0b00010010];
         parse_passages(&data2, 12, "vertical");
         // 10010000 00010010 01001000
@@ -728,7 +862,7 @@ mod tests {
             Boundary::Wall,
             Boundary::Undefined,
         ];
-        assert_eq!(passagesV2, expected);
+        assert_eq!(passages, expected);
     }
 
     #[test]
@@ -1191,12 +1325,13 @@ mod tests {
         | #####\n\
         •-•####\n";
 
-        let twoD_cells: Vec<Vec<RadarCell>> = cells
+        let two_d_cells: Vec<Vec<RadarCell>> = cells
             .chunks(3)
             .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
             .collect(); // Collect into a Vec<Vec<RadarCell>>
 
-        let result = get_radar_map_as_string(&twoD_cells, &horizontal_passages, &vertical_passages);
+        let result =
+            get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages);
 
         assert_eq!(result, expected);
     }
@@ -1290,12 +1425,13 @@ mod tests {
         ##| |##\n\
         ##• •##\n";
 
-        let twoD_cells: Vec<Vec<RadarCell>> = cells
+        let two_d_cells: Vec<Vec<RadarCell>> = cells
             .chunks(3)
             .map(|chunk| chunk.to_vec()) // Convert the slice to an owned Vec<RadarCell>
             .collect(); // Collect into a Vec<Vec<RadarCell>>
 
-        let result = get_radar_map_as_string(&twoD_cells, &horizontal_passages, &vertical_passages);
+        let result =
+            get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages);
 
         assert_eq!(result, expected);
     }

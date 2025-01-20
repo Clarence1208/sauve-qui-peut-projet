@@ -18,8 +18,14 @@ pub(crate) struct SubscribePlayer {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub(crate) struct Action {
-    pub(crate) MoveTo: Direction,
+pub(crate) struct Answer {
+    pub(crate) answer: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub(crate) enum Action {
+    MoveTo(Direction),
+    SolveChallenge(Answer),
 }
 
 /**
