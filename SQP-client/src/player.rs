@@ -6,21 +6,19 @@ use crate::server_utils::{receive_message, send_message};
 use crate::SECRET_MAP;
 use log::{debug, error, info};
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::Write;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex, OnceLock};
 
 /**
  * The Boundary enum represents the different types of boundaries in the labyrinth.
  */
-#[derive(Debug, Clone, Eq, Hash)]
+#[derive(Debug, Clone, Eq, Hash, PartialEq)]
 pub(crate) enum Boundary {
     Undefined,
     Open,
     Wall,
-    BoundaryError,
+    Error,
 }
 
 impl Boundary {
@@ -29,27 +27,27 @@ impl Boundary {
             Boundary::Undefined => Boundary::Undefined,
             Boundary::Open => Boundary::Open,
             Boundary::Wall => Boundary::Wall,
-            Boundary::BoundaryError => Boundary::BoundaryError,
+            Boundary::Error => Boundary::Error,
         }
     }
 }
 
-impl PartialEq for Boundary {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Boundary::Undefined, Boundary::Undefined) => true,
-            (Boundary::Open, Boundary::Open) => true,
-            (Boundary::Wall, Boundary::Wall) => true,
-            (Boundary::BoundaryError, Boundary::BoundaryError) => true,
-            _ => false,
-        }
-    }
-}
+// impl PartialEq for Boundary {
+//     fn eq(&self, other: &Self) -> bool {
+//         matches!(
+//             (self, other),
+//             (Boundary::Undefined, Boundary::Undefined)
+//                 | (Boundary::Open, Boundary::Open)
+//                 | (Boundary::Wall, Boundary::Wall)
+//                 | (Boundary::Error, Boundary::Error)
+//         )
+//     }
+// }
 
 /**
  * The Entity enum represents the different types of entities in the labyrinth.
  */
-#[derive(Debug, Eq, Hash, Clone)]
+#[derive(Debug, Eq, Hash, Clone, PartialEq)]
 enum Entity {
     None,
     Ally,
@@ -57,38 +55,36 @@ enum Entity {
     Monster,
 }
 
-impl PartialEq for Entity {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Entity::None, Entity::None) => true,
-            (Entity::Ally, Entity::Ally) => true,
-            (Entity::Enemy, Entity::Enemy) => true,
-            (Entity::Monster, Entity::Monster) => true,
-            _ => false,
-        }
-    }
-}
+// impl PartialEq for Entity {
+//     fn eq(&self, other: &Self) -> bool {
+//         matches!(
+//             (self, other),
+//             (Entity::None, Entity::None)
+//                 | (Entity::Ally, Entity::Ally)
+//                 | (Entity::Enemy, Entity::Enemy)
+//                 | (Entity::Monster, Entity::Monster)
+//         )
+//     }
+// }
 
 /**
  * The Item enum represents the different types of items in the labyrinth.
  */
-#[derive(Debug, Eq, Hash, Clone)]
+#[derive(Debug, Eq, Hash, Clone, PartialEq)]
 enum Item {
     None,
     Hint,
     Goal,
 }
 
-impl PartialEq for Item {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Item::None, Item::None) => true,
-            (Item::Hint, Item::Hint) => true,
-            (Item::Goal, Item::Goal) => true,
-            _ => false,
-        }
-    }
-}
+// impl PartialEq for Item {
+//     fn eq(&self, other: &Self) -> bool {
+//         matches!(
+//             (self, other),
+//             (Item::None, Item::None) | (Item::Hint, Item::Hint) | (Item::Goal, Item::Goal)
+//         )
+//     }
+// }
 
 /**
  * The RadarCell struct represents a cell in the radar view.
@@ -213,7 +209,7 @@ fn search_for_exit(
             // get next message from server to get the radar view
             action_response =
                 receive_message(&mut player_stream).expect("Failed to receive action response");
-            if (action_response.contains("RadarView")) {
+            if action_response.contains("RadarView") {
                 // Log the challenge solution in projectRoot/log/challenge.log
                 log_message(
                     "challenge",
@@ -350,7 +346,7 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
 // waiting for user input 1,2,3 or 4
 fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
     let mut current_direction = Direction::Right;
-    while true {
+    loop {
         // 1 = front, 2 = right, 3 = back, 4 = left
         let mut input = String::new();
         std::io::stdin()
@@ -394,8 +390,8 @@ fn choose_direction_by_hand(player_name: String, mut player_stream: TcpStream) {
  */
 fn is_direction_open(
     next_direction: &Direction,
-    h_passages: &Vec<Boundary>,
-    v_passages: &Vec<Boundary>,
+    h_passages: &[Boundary],
+    v_passages: &[Boundary],
 ) -> bool {
     // We know the player is in the center cell of the radar view.
     // We are following the right-hand rule, so we want to check the passage to the right of the player.
@@ -438,10 +434,7 @@ fn is_direction_open(
 
     println!("Passage checked: {:?}", passage);
 
-    match passage {
-        Boundary::Open => true,
-        _ => false,
-    }
+    matches!(passage, Boundary::Open)
 }
 
 /**
@@ -475,7 +468,7 @@ pub(crate) fn parse_radar_response(
     }
 
     // Decode the radar data
-    let decoded_radar_data = decode(&radar_data).expect("Failed to decode radar data");
+    let decoded_radar_data = decode(radar_data).expect("Failed to decode radar data");
 
     // Print the decoded radar data
     println!("Decoded radar data: {:?}", decoded_radar_data);
@@ -574,7 +567,7 @@ fn parse_passages(bytes: &[u8], num_passages: usize, passage_type: &str) -> Vec<
             0 => Boundary::Undefined,
             1 => Boundary::Open,
             2 => Boundary::Wall,
-            _ => Boundary::BoundaryError, // Error value for 0b11
+            _ => Boundary::Error, // Error value for 0b11
         };
         passages.push(passage);
     }
@@ -593,7 +586,7 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
     }
 
     // The 4 padding bits are the 4 least significant bits
-    bits = bits >> 4;
+    bits >>= 4;
 
     for i in (0..9).rev() {
         let value = (bits >> (i * 4)) & 0b1111;
@@ -635,32 +628,30 @@ fn parse_cells(data: &[u8]) -> Vec<RadarCell> {
     cells
 }
 
-/**
-* The get_radar_map_as_string function generates a string representation of the radar map.<br>
-* It takes the radar cells, horizontal passages, and vertical passages as input.<br>
-* It constructs the map line by line, using symbols to represent the different elements:
-* - '#' for undefined cells and passages
-* - ' ' for defined cells and open passages
-* - '-' for walls in horizontal passages
-* - '|' for walls in vertical passages
-* - '•' for joints between passages
-* It returns the radar map as a string.
-*
-* @param cells: &Vec<RadarCell> - The radar cells (9 cells)<br>
-* @param h_passages: &Vec<Boundary> - The horizontal passages (12 passages)<br>
-* @param v_passages: &Vec<Boundary> - The vertical passages (12 passages)<br>
- */
+/// The get_radar_map_as_string function generates a string representation of the radar map.<br>
+/// It takes the radar cells, horizontal passages, and vertical passages as input.<br>
+/// It constructs the map line by line, using symbols to represent the different elements:
+/// - '#' for undefined cells and passages
+/// - ' ' for defined cells and open passages
+/// - '-' for walls in horizontal passages
+/// - '|' for walls in vertical passages
+/// - '•' for joints between passages
+/// It returns the radar map as a string.
+///
+/// @param cells: &Vec<RadarCell> - The radar cells (9 cells)<br>
+/// @param h_passages: &[Boundary] - The horizontal passages (12 passages)<br>
+/// @param v_passages: &[Boundary] - The vertical passages (12 passages)<br>
 fn get_radar_map_as_string(
     cells: &Vec<Vec<RadarCell>>,
-    h_passages: &Vec<Boundary>,
-    v_passages: &Vec<Boundary>,
+    h_passages: &[Boundary],
+    v_passages: &[Boundary],
 ) -> String {
     // Symbol mappings
-    let symboles_cellules = std::collections::HashMap::from([(true, '#'), (false, ' ')]);
+    let symbols_cells = std::collections::HashMap::from([(true, '#'), (false, ' ')]);
 
     let joint = '•';
 
-    let symboles_passages_horizontal = std::collections::HashMap::from([
+    let symbols_passages_horizontal = std::collections::HashMap::from([
         (Boundary::Undefined, '#'),
         (Boundary::Open, ' '),
         (Boundary::Wall, '-'),
@@ -702,7 +693,7 @@ fn get_radar_map_as_string(
                 // if j is not pair check if joint char is needed '•'
                 if j % 2 != 0 {
                     ligne.push(
-                        *symboles_passages_horizontal
+                        *symbols_passages_horizontal
                             .get(&passages_horizontaux[i / 2][j / 2])
                             .unwrap(),
                     );
@@ -750,7 +741,7 @@ fn get_radar_map_as_string(
                     );
                 } else {
                     ligne.push(
-                        *symboles_cellules
+                        *symbols_cells
                             .get(&cells[i / 2][j / 2].is_undefined)
                             .unwrap(),
                     );
@@ -887,18 +878,18 @@ mod tests {
         // 11001100 01100110 00011011
         let passages = parse_passages(&data, 12, "horizontal");
         let expected = vec![
-            Boundary::BoundaryError,
+            Boundary::Error,
             Boundary::Undefined,
-            Boundary::BoundaryError,
-            Boundary::Undefined,
-            Boundary::Open,
-            Boundary::Wall,
-            Boundary::Open,
-            Boundary::Wall,
+            Boundary::Error,
             Boundary::Undefined,
             Boundary::Open,
             Boundary::Wall,
-            Boundary::BoundaryError,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Undefined,
+            Boundary::Open,
+            Boundary::Wall,
+            Boundary::Error,
         ];
         assert_eq!(passages, expected);
     }
@@ -909,18 +900,18 @@ mod tests {
         let passages = parse_passages(&data, 12, "horizontal");
         assert_eq!(passages.len(), 12);
         let expected = vec![
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
-            Boundary::BoundaryError,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
+            Boundary::Error,
         ];
         assert_eq!(passages, expected);
     }

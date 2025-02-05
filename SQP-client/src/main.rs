@@ -10,10 +10,10 @@ mod logger;
 use player::start_player_thread;
 use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
-use std::net::TcpStream;
-use std::{env, io, thread};
 use std::collections::HashMap;
+use std::net::TcpStream;
 use std::sync::{Arc, Mutex, OnceLock};
+use std::{env, io, thread};
 
 static SECRET_MAP: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
 
