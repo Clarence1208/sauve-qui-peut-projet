@@ -5,6 +5,7 @@ mod models;
 mod player;
 mod request_models;
 mod server_utils;
+mod logger;
 
 use player::start_player_thread;
 use request_models::{Message, RegisterTeam};
@@ -17,6 +18,11 @@ use std::sync::{Arc, Mutex, OnceLock};
 static SECRET_MAP: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
 
 fn main() -> io::Result<()> {
+
+    // Setup logging
+    logger::init_logging("log",&["main", "player", "server_response", "challenge", "hint"])?;
+
+
     // Step 1: Get server address from command line arguments
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {

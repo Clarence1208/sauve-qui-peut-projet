@@ -1,4 +1,5 @@
 use crate::decoder::decode;
+use crate::logger::log_message;
 use crate::models::{turn_left, Direction};
 use crate::request_models::{Action, Answer, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
@@ -214,28 +215,10 @@ fn search_for_exit(
                 receive_message(&mut player_stream).expect("Failed to receive action response");
             if (action_response.contains("RadarView")) {
                 // Log the challenge solution in projectRoot/log/challenge.log
-                let log_dir = "log";
-                if let Err(e) = std::fs::create_dir_all(log_dir) {
-                    error!("Failed to create log directory: {}", e);
-                    return;
-                }
-
-                let challenge_log_file = format!("{}/challenge.log", log_dir);
-                if let Err(e) = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&challenge_log_file)
-                    .and_then(|mut file| {
-                        file.write_all(
-                            format!("Player {} successfully solved the challenge\n", player_name)
-                                .as_bytes(),
-                        )
-                    })
-                {
-                    error!("Failed to write challenge to {}: {}", challenge_log_file, e);
-                } else {
-                    info!("Challenge logged to {}", challenge_log_file);
-                }
+                log_message(
+                    "challenge",
+                    &format!("Player {} successfully solved the challenge\n", player_name),
+                );
             }
         }
 
@@ -345,28 +328,11 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
                         player_name, modulo_result
                     );
 
-                    // Log the challenge solution in projectRoot/log/challenge.log
-                    let log_dir = "log";
-                    if let Err(e) = std::fs::create_dir_all(log_dir) {
-                        error!("Failed to create log directory: {}", e);
-                        return;
-                    }
-
-                    let challenge_log_file = format!("{}/challenge.log", log_dir);
-                    if let Err(e) = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&challenge_log_file)
-                        .and_then(|mut file| {
-                            file.write_all(
-                                format!("Player: {} found:{}\n", player_name, challenge).as_bytes(),
-                            )
-                        })
-                    {
-                        error!("Failed to write challenge to {}: {}", challenge_log_file, e);
-                    } else {
-                        info!("Challenge logged to {}", challenge_log_file);
-                    }
+                    // Log the challenge solution
+                    log_message(
+                        "challenge",
+                        &format!("Player {} found: {}", player_name, challenge),
+                    );
                 }
             }
         } else {
