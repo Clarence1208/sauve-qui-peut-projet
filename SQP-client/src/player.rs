@@ -34,6 +34,7 @@ impl Boundary {
     }
 }
 
+
 // impl PartialEq for Boundary {
 //     fn eq(&self, other: &Self) -> bool {
 //         matches!(
@@ -100,6 +101,15 @@ pub(crate) struct RadarCell {
     item: Item,
     entity: Entity,
 }
+
+/**
+ * The Coordinates struct represents a x and y position in the map.
+ */
+ #[derive(Debug, Eq, PartialEq, Hash, Clone)]
+ pub(crate) struct Coordinates {
+    position_x: usize,
+    position_y: usize,
+ }
 
 /**
  * The MapCell struct represents a cell in the map.
@@ -296,7 +306,7 @@ fn search_for_exit_smart(
 
     // // main loop for player movement
     loop {
-        let next_direction = find_closest_open(&mut map, None);
+        let next_direction = find_closest_open(&mut map, &mut Vec::new());
         println!("Next direction: {:?} with {} steps", next_direction.direction, next_direction.steps);
         println!("North at: {:?}", north_at);
     //     // check if the player can go right else try front then left then back
@@ -406,44 +416,13 @@ fn search_for_exit_smart(
             return;
         }
 
-        println!("After Message");
-
-        for i in 0..map.len() {
-            for j in 0..map[i].len() {
-                if map[i][j].is_player_here {
-                    println!("Player at: {}, {}", i, j);
-                }
-            }
-        }
-
         let mut map_new = parse_radar_response_smart(&action_response);
         
-        println!("After Parse Radar");
-
-        for i in 0..map.len() {
-            for j in 0..map[i].len() {
-                if map[i][j].is_player_here {
-                    println!("Player at: {}, {}", i, j);
-                }
-            }
-        }
         map_new = rotate_map(map_new, next_direction.direction);
-
-        
-        println!("After Rotating Map");
-
-        for i in 0..map.len() {
-            for j in 0..map[i].len() {
-                if map[i][j].is_player_here {
-                    println!("Player at: {}, {}", i, j);
-                }
-            }
-        }
-
         map = update_map(&mut map, map_new, next_direction.direction).to_vec();
 
         // // timeout 1/100 of a second
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 
 }
@@ -643,7 +622,7 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
     }
 }
 
-fn find_closest_open(map: &mut Vec<Vec<MapCell>>, previous_move: Option<MapDirection>) -> NextDirection {
+fn find_closest_open(map: &mut Vec<Vec<MapCell>>, previous_move: &mut Vec<Coordinates>) -> NextDirection {
 
     let mut player_x = 0;
     let mut player_y = 0;
@@ -653,7 +632,7 @@ fn find_closest_open(map: &mut Vec<Vec<MapCell>>, previous_move: Option<MapDirec
             if map[i][j].is_player_here {
                 player_x = i;
                 player_y = j;
-                println!("Player at: {}, {}", player_x, player_y);
+                println!("Closest Player at: {}, {}", player_x, player_y);
             }
         }
     }
@@ -686,83 +665,146 @@ fn find_closest_open(map: &mut Vec<Vec<MapCell>>, previous_move: Option<MapDirec
 
     let mut less_moves_for_north = NextDirection {
         direction: MapDirection::North,
-        steps: 0,
+        steps: 999,
     };
     let mut less_moves_for_south = NextDirection {
         direction: MapDirection::South,
-        steps: 0,
+        steps: 999,
     };
     let mut less_moves_for_east = NextDirection {
         direction: MapDirection::East,
-        steps: 0,
+        steps: 999,
     };
     let mut less_moves_for_west = NextDirection {
         direction: MapDirection::West,
-        steps: 0,
+        steps: 999,
     };
 
-    if matches!(previous_move, None) || !matches!(previous_move, Some(MapDirection::North)) {
-        if map[player_x][player_y].south == Boundary::Open || map[player_x][player_y].south == Boundary::Checked {
-            if player_y != map[player_x].len()-1 {
+    let mut coordinates = Coordinates {
+        position_x: player_x,
+        position_y: player_y,
+    };
+
+    previous_move.push(coordinates);
+
+    if map[player_x][player_y].south == Boundary::Open || map[player_x][player_y].south == Boundary::Checked {
+        if player_x != map.len()-1 {
+            let mut found = false;
+            for i in 0..previous_move.len() {
+                if previous_move[i].position_x == player_x+1 && previous_move[i].position_y == player_y {
+                    found = true;
+                }
+            }
+            if !found {
                 let mut temp_map = map.clone();
                 temp_map[player_x][player_y].is_player_here = false;
-                temp_map[player_x][player_y + 1].is_player_here = true;
-                less_moves_for_south = find_closest_open(&mut temp_map, Some(MapDirection::South));
+                temp_map[player_x+1][player_y].is_player_here = true;
+                less_moves_for_south = find_closest_open(&mut temp_map, previous_move);
             }
         }
     }
-    if matches!(previous_move, None) || !matches!(previous_move, Some(MapDirection::South)) {
-        if map[player_x][player_y].north == Boundary::Open || map[player_x][player_y].north == Boundary::Checked {
-            if player_y != 0 {
+    if map[player_x][player_y].north == Boundary::Open || map[player_x][player_y].north == Boundary::Checked {
+        if player_x != 0 {
+            let mut found = false;
+            for i in 0..previous_move.len() {
+                if previous_move[i].position_x == player_x-1 && previous_move[i].position_y == player_y {
+                    found = true;
+                }
+            }
+            if !found {
                 let mut temp_map = map.clone();
                 temp_map[player_x][player_y].is_player_here = false;
-                temp_map[player_x][player_y - 1].is_player_here = true;
-                less_moves_for_north = find_closest_open(&mut temp_map, Some(MapDirection::North));
+                temp_map[player_x-1][player_y].is_player_here = true;
+                less_moves_for_north = find_closest_open(&mut temp_map, previous_move);
             }
         }
     }
-    if matches!(previous_move, None) || !matches!(previous_move, Some(MapDirection::East)) {
-        if map[player_x][player_y].west == Boundary::Open || map[player_x][player_y].west == Boundary::Checked {
-            if player_x != 0 {
+    if map[player_x][player_y].west == Boundary::Open || map[player_x][player_y].west == Boundary::Checked {
+        if player_y != 0 {
+            let mut found = false;
+            for i in 0..previous_move.len() {
+                if previous_move[i].position_x == player_x && previous_move[i].position_y == player_y-1 {
+                    found = true;
+                }
+            }
+            if !found {
                 let mut temp_map = map.clone();
                 temp_map[player_x][player_y].is_player_here = false;
-                temp_map[player_x - 1][player_y].is_player_here = true;
-                less_moves_for_west = find_closest_open(&mut temp_map, Some(MapDirection::West));
+                temp_map[player_x][player_y-1].is_player_here = true;
+                less_moves_for_west = find_closest_open(&mut temp_map, previous_move);
             }
         }
     }
-    if matches!(previous_move, None) || !matches!(previous_move, Some(MapDirection::West)) {
-        if map[player_x][player_y].east == Boundary::Open || map[player_x][player_y].east == Boundary::Checked {
-            if player_x != map.len()-1 {
+    if map[player_x][player_y].east == Boundary::Open || map[player_x][player_y].east == Boundary::Checked {
+        if player_y != map[0].len()-1 {
+            let mut found = false;
+            for i in 0..previous_move.len() {
+                if previous_move[i].position_x == player_x && previous_move[i].position_y == player_y+1 {
+                    found = true;
+                }
+            }
+            if !found {
                 let mut temp_map = map.clone();
                 temp_map[player_x][player_y].is_player_here = false;
-                temp_map[player_x + 1][player_y].is_player_here = true;
-                less_moves_for_east = find_closest_open(&mut temp_map, Some(MapDirection::East));
+                temp_map[player_x][player_y+1].is_player_here = true;
+                less_moves_for_east = find_closest_open(&mut temp_map, previous_move);
             }
         }
     }
 
-    if (less_moves_for_north.steps >= less_moves_for_south.steps) && (less_moves_for_north.steps >= less_moves_for_east.steps) && (less_moves_for_north.steps >= less_moves_for_west.steps) {
+    if (less_moves_for_north.steps == 0 && less_moves_for_south.steps == 0 && less_moves_for_east.steps == 0 && less_moves_for_west.steps == 0) {
         return NextDirection {
             direction: MapDirection::North,
-            steps: less_moves_for_north.steps + 1,
-        };
-    } else if (less_moves_for_south.steps >= less_moves_for_north.steps) && (less_moves_for_south.steps >= less_moves_for_east.steps) && (less_moves_for_south.steps >= less_moves_for_west.steps) {
-        return NextDirection {
-            direction: MapDirection::South,
-            steps: less_moves_for_south.steps + 1,
-        };
-    } else if (less_moves_for_east.steps >= less_moves_for_north.steps) && (less_moves_for_east.steps >= less_moves_for_south.steps) && (less_moves_for_east.steps >= less_moves_for_west.steps) {
-        return NextDirection {
-            direction: MapDirection::East,
-            steps: less_moves_for_east.steps + 1,
-        };
-    } else {
-        return NextDirection {
-            direction: MapDirection::West,
-            steps: less_moves_for_west.steps + 1,
+            steps: 999,
         };
     }
+
+    println!("Less moves for North are {:?} with {} steps", less_moves_for_north.direction, less_moves_for_north.steps);
+    println!("Less moves for South are {:?} with {} steps", less_moves_for_south.direction, less_moves_for_south.steps);
+    println!("Less moves for East are {:?} with {} steps", less_moves_for_east.direction, less_moves_for_east.steps);
+    println!("Less moves for West are {:?} with {} steps", less_moves_for_west.direction, less_moves_for_west.steps);
+
+    if (less_moves_for_north.steps <= less_moves_for_south.steps) && (less_moves_for_north.steps <= less_moves_for_east.steps) && (less_moves_for_north.steps <= less_moves_for_west.steps) {
+        if less_moves_for_north.steps != 0 {
+            println!("Returning North with {} steps", less_moves_for_north.steps);
+            return NextDirection {
+                direction: MapDirection::North,
+                steps: less_moves_for_north.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_south.steps <= less_moves_for_north.steps) && (less_moves_for_south.steps <= less_moves_for_east.steps) && (less_moves_for_south.steps <= less_moves_for_west.steps) {
+        if less_moves_for_south.steps != 0 {
+            println!("Returning South with {} steps", less_moves_for_south.steps);
+            return NextDirection {
+                direction: MapDirection::South,
+                steps: less_moves_for_south.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_east.steps <= less_moves_for_north.steps) && (less_moves_for_east.steps <= less_moves_for_south.steps) && (less_moves_for_east.steps <= less_moves_for_west.steps) {
+        if less_moves_for_east.steps != 0 {
+            println!("Returning East with {} steps", less_moves_for_east.steps);
+            return NextDirection {
+                direction: MapDirection::East,
+                steps: less_moves_for_east.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_west.steps <= less_moves_for_north.steps) && (less_moves_for_west.steps <= less_moves_for_south.steps) && (less_moves_for_west.steps <= less_moves_for_east.steps) {
+        if less_moves_for_west.steps != 0 {
+            println!("Returning West with {} steps", less_moves_for_west.steps);
+            return NextDirection {
+                direction: MapDirection::West,
+                steps: less_moves_for_west.steps + 1,
+            };
+        }
+    }
+
+    return NextDirection {
+        direction: MapDirection::North,
+        steps: 0,
+    };
 }
 
 fn rotate_map(map: Vec<Vec<MapCell>>, direction: MapDirection) -> Vec<Vec<MapCell>> {
@@ -815,8 +857,6 @@ fn update_map(mut map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direc
         for j in 0..map[i].len()-1 {
             if map[i][j].is_player_here {
                 if !player_moved {
-                    println!("Before updating");
-                    println!("Player at: {}, {}", i, j);
                     map[i][j].is_player_here = false;
                     if direction == MapDirection::North {
                         map[i - 1][j].is_player_here = true;
@@ -851,9 +891,6 @@ fn update_map(mut map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direc
             }
         }
     }
-
-    println!("After updating");
-    println!("Player at: {}, {}", player_x, player_y);
 
     if direction == MapDirection::North {
         if player_x == 0 {
