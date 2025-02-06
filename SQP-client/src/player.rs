@@ -291,26 +291,66 @@ fn search_for_exit_smart(
     let mut map = parse_radar_response_smart(&initial_radar_response);
     // Initial player direction
 
+    let mut north_at : MapDirection = MapDirection::North;
+
 
     // // main loop for player movement
     loop {
         let next_direction = find_closest_open(&mut map, None);
         println!("Next direction: {:?} with {} steps", next_direction.direction, next_direction.steps);
+        println!("North at: {:?}", north_at);
     //     // check if the player can go right else try front then left then back
     //     while !is_direction_open(&current_direction, &horizontal_passages, &vertical_passages) {
     //         current_direction = turn_left(&current_direction);
     //     }
     //     // Send the current movement action
-        let mut current_direction = Direction::Right;
-        if next_direction.direction == MapDirection::North {
-            current_direction = Direction::Front;
-        } else if next_direction.direction == MapDirection::East {
-            current_direction = Direction::Right;
-        } else if next_direction.direction == MapDirection::South {
-            current_direction = Direction::Back;
-        } else if next_direction.direction == MapDirection::West {
-            current_direction = Direction::Left;
+
+        let mut current_direction = Direction::Front;
+        if north_at == MapDirection::North {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Left;
+            }
+        } else if north_at == MapDirection::East {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Back;
+            }
+        } else if north_at == MapDirection::South {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Right;
+            }
+        } else if north_at == MapDirection::West {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Front;
+            }
         }
+
+        calculate_next_north(&mut north_at, &current_direction);
+
+        print_map(&map);
         let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
 
         send_message(&mut player_stream, &action_message).expect("Failed to send action");
@@ -369,19 +409,110 @@ fn search_for_exit_smart(
         let mut map_new = parse_radar_response_smart(&action_response);
         map_new = rotate_map(map_new, next_direction.direction);
 
-        update_map(&mut map, map_new, next_direction.direction);
-
-        let next_direction = find_closest_open(&mut map, None);
-        println!("Next direction: {:?} with {} steps", next_direction.direction, next_direction.steps);
+        map = update_map(&mut map, map_new, next_direction.direction).to_vec();
 
         // // timeout 1/100 of a second
-        std::thread::sleep(std::time::Duration::from_millis(10));
-
-        return;
+        std::thread::sleep(std::time::Duration::from_millis(5000));
     }
 
-    return;
+}
 
+fn calculate_next_north(north_at: &mut MapDirection, current_direction: &Direction) {
+    if current_direction == &Direction::Right {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::East;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::South;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::North;
+        }
+    } else if current_direction == &Direction::Left {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::North;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::East;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::South;
+        }
+    } else if current_direction == &Direction::Back {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::South;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::North;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::East;
+        }
+    }
+}
+
+fn print_map(map: &Vec<Vec<MapCell>>) {
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if map[i][j].north == Boundary::Wall {
+                print!("•-");
+            } else if map[i][j].north == Boundary::Open {
+                print!("• ");
+            } else if map[i][j].north == Boundary::Checked {
+                print!("•C");
+            } else {
+                print!("•*");
+            }
+            if j == map[i].len() - 1 {
+                println!("•");
+            }
+        }
+        for j in 0..map[i].len() {
+            if map[i][j].west == Boundary::Wall {
+                print!("|");
+            } else if map[i][j].west == Boundary::Open {
+                print!(" ");
+            } else if map[i][j].west == Boundary::Checked {
+                print!("C");
+            } else {
+                print!("*");
+            }
+            if map[i][j].is_player_here {
+                print!("P");
+            } else {
+                print!(" ");
+            }
+            if j == map[i].len() - 1 {
+                if map[i][j].east == Boundary::Wall {
+                    print!("|");
+                } else if map[i][j].east == Boundary::Open {
+                    print!(" ");
+                } else if map[i][j].east == Boundary::Checked {
+                    print!("C");
+                } else {
+                    print!("*");
+                }
+            }
+        }
+        if i == map.len() - 1 {
+            println!();
+            for j in 0..map[i].len() {
+                if map[i][j].south == Boundary::Wall {
+                    print!("•-");
+                } else if map[i][j].south == Boundary::Open {
+                    print!("• ");
+                } else if map[i][j].south == Boundary::Checked {
+                    print!("•C");
+                } else {
+                    print!("•*");
+                }
+                if j == map[i].len() - 1 {
+                    println!("•");
+                }
+            }
+        }
+        println!();
+    }
 }
 
 fn handle_hint(player_name: &String, hint: &String) {
@@ -489,7 +620,6 @@ fn find_closest_open(map: &mut Vec<Vec<MapCell>>, previous_move: Option<MapDirec
     for i in 0..map.len() {
         for j in 0..map[i].len() {
             if map[i][j].is_player_here {
-                println!("Player is at [{}, {}]", i, j);
                 player_x = i;
                 player_y = j;
             }
@@ -638,7 +768,7 @@ fn rotate_map(map: Vec<Vec<MapCell>>, direction: MapDirection) -> Vec<Vec<MapCel
     return new_map.clone();
 } 
 
-fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction: MapDirection) {
+fn update_map(mut map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction: MapDirection) -> &mut Vec<Vec<MapCell>> {
     let mut player_x = 0;
     let mut player_y = 0;
     for i in 0..map.len()-1 {
@@ -647,21 +777,29 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
                 map[i][j].is_player_here = false;
                 if direction == MapDirection::North {
                     map[i - 1][j].is_player_here = true;
+                    map[i - 1][j].south = Boundary::Checked;
+                    map[i][j].north = Boundary::Checked;
                     player_x = i - 1;
                     player_y = j;
                     break;
                 } else if direction == MapDirection::East {
                     map[i][j + 1].is_player_here = true;
+                    map[i][j + 1].west = Boundary::Checked;
+                    map[i][j].east = Boundary::Checked;
                     player_x = i;
                     player_y = j + 1;
                     break;
                 } else if direction == MapDirection::South {
                     map[i + 1][j].is_player_here = true;
+                    map[i + 1][j].north = Boundary::Checked;
+                    map[i][j].south = Boundary::Checked;
                     player_x = i + 1;
                     player_y = j;
                     break;
                 } else if direction == MapDirection::West {
                     map[i][j - 1].is_player_here = true;
+                    map[i][j - 1].east = Boundary::Checked;
+                    map[i][j].west = Boundary::Checked;
                     player_x = i;
                     player_y = j - 1;
                     break;
@@ -671,7 +809,7 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
     }
 
     if direction == MapDirection::North {
-        if player_y == 0 {
+        if player_x == 0 {
             let mut combined_map = vec![vec![MapCell {
                 north: Boundary::Undefined,
                 east: Boundary::Undefined,
@@ -682,9 +820,10 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
             for i in 1..combined_map.len() {
                 combined_map[i] = map[i - 1].clone();
             }
+            *map = combined_map;
         }
     } else if direction == MapDirection::East {
-        if player_x == map.len() - 1 {
+        if player_y == map[0].len() - 1 {
             let mut combined_map = vec![vec![MapCell {
                 north: Boundary::Undefined,
                 east: Boundary::Undefined,
@@ -693,17 +832,14 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
                 is_player_here: false,
             }; map[0].len() + 1]; map.len()];
             for i in 0..combined_map.len() {
-                for j in 0..combined_map[i].len() {
-                    if j == 0 {
-                        combined_map[i][j] = map[i][j].clone();
-                    } else {
-                        combined_map[i][j] = new_map[i][j - 1].clone();
-                    }
+                for j in 0..combined_map[i].len()-1 {
+                    combined_map[i][j] = map[i][j].clone();
                 }
             }
+            *map = combined_map;
         }
     } else if direction == MapDirection::South {
-        if player_y == map[0].len() - 1 {
+        if player_x == map.len() - 1 {
             let mut combined_map = vec![vec![MapCell {
                 north: Boundary::Undefined,
                 east: Boundary::Undefined,
@@ -711,12 +847,13 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
                 west: Boundary::Undefined,
                 is_player_here: false,
             }; map[0].len()]; map.len() + 1];
-            for i in 0..combined_map.len() {
+            for i in 0..combined_map.len()-1 {
                 combined_map[i] = map[i].clone();
             }
+            *map = combined_map;
         }
     } else if direction == MapDirection::West {
-        if player_x == 0 {
+        if player_y == 0 {
             let mut combined_map = vec![vec![MapCell {
                 north: Boundary::Undefined,
                 east: Boundary::Undefined,
@@ -729,8 +866,38 @@ fn update_map(map: &mut Vec<Vec<MapCell>>, new_map: Vec<Vec<MapCell>>, direction
                     combined_map[i][j] = map[i][j - 1].clone();
                 }
             }
+            *map = combined_map;
         }
     }
+
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if map[i][j].is_player_here {
+                player_x = i;
+                player_y = j;
+            }
+        }
+    }
+
+    for i in 0..new_map.len() {
+        for j in 0..new_map[i].len() {
+            if map[(player_x + i)-1][(player_y + j)-1].north == Boundary::Undefined {
+                map[(player_x + i)-1][(player_y + j)-1].north = new_map[i][j].north.clone();
+            }
+            if map[(player_x + i)-1][(player_y + j)-1].east == Boundary::Undefined {
+                map[(player_x + i)-1][(player_y + j)-1].east = new_map[i][j].east.clone();
+            }
+            if map[(player_x + i)-1][(player_y + j)-1].south == Boundary::Undefined {
+                map[(player_x + i)-1][(player_y + j)-1].south = new_map[i][j].south.clone();
+            }
+            if map[(player_x + i)-1][(player_y + j)-1].west == Boundary::Undefined {
+                map[(player_x + i)-1][(player_y + j)-1].west = new_map[i][j].west.clone();
+            }
+        }
+    }
+
+    return map;
+
 }
 
 // fixme remove, only for testing
