@@ -71,7 +71,7 @@ fn main() -> io::Result<()> {
     let registration_token = parse_token_from_response(&response)?;
 
     // Step 5: Spawn threads for each player
-    let players = ["Nino", "Paul", "Loriane"];
+    let players = ["Nino"];
     let mut handles = vec![];
     for player in players.iter() {
         let player_name = player.to_string();
