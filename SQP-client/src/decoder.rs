@@ -1,3 +1,5 @@
+use crate::error::{Error, DecodeError};
+
 fn char_to_value(c: char) -> Option<u8> {
     match c {
         'a'..='z' => Some((c as u8) - b'a'),
@@ -9,16 +11,16 @@ fn char_to_value(c: char) -> Option<u8> {
     }
 }
 
-pub(crate) fn decode(input: &str) -> Result<Vec<u8>, String> {
+pub(crate) fn decode(input: &str) -> Result<Vec<u8>, Error> {
     if input.len() % 4 == 1 {
-        return Err("Invalid size (form 4n+1)".to_string());
+        return Err(DecodeError::InvalidSize.into());
     }
 
     let mut values = Vec::new();
     for c in input.chars() {
         match char_to_value(c) {
             Some(v) => values.push(v),
-            None => return Err(format!("Character unauthorized '{}'", c)),
+            None => return Err(DecodeError::UnauthorizedCharacter(c).into()),
         }
     }
 
@@ -28,7 +30,7 @@ pub(crate) fn decode(input: &str) -> Result<Vec<u8>, String> {
     while i < values.len() {
         let chunk_len = std::cmp::min(4, values.len() - i);
         if chunk_len < 2 {
-            return Err("Segment size invalid (less than 2 characters)".to_string());
+            return Err(DecodeError::InvalidSegmentSize.into());
         }
 
         let v0 = values[i];

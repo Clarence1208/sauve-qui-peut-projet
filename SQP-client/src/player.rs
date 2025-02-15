@@ -4,11 +4,13 @@ use crate::models::{turn_left, Direction};
 use crate::request_models::{Action, Answer, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
 use crate::SECRET_MAP;
+use crate::error::{Error, NetworkError, PlayerError};
 use log::{debug, error, info};
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::io::Write;
 use std::net::TcpStream;
+use std::fmt;
 
 /**
  * The Boundary enum represents the different types of boundaries in the labyrinth.
@@ -67,9 +69,9 @@ pub(crate) fn start_player_thread(
     player_name: String,
     registration_token: String,
     server_address: String,
-) {
-    let mut player_stream =
-        TcpStream::connect(server_address).expect("Failed to connect to server");
+) -> Result<(), Error> {
+    let mut player_stream = TcpStream::connect(server_address)
+        .map_err(|_| NetworkError::ConnectionFailed)?;
     println!("Connected for player: {}", player_name);
 
     // Subscribe the player
@@ -78,28 +80,30 @@ pub(crate) fn start_player_thread(
         registration_token: registration_token.clone(),
     });
     send_message(&mut player_stream, &subscribe_player_message)
-        .expect("Failed to subscribe player");
+        .map_err(|_| PlayerError::SubscriptionFailed("Failed to subscribe player".to_string()))?;
     println!("Subscribed player: {}", player_name);
 
-    let response =
-        receive_message(&mut player_stream).expect("Failed to receive subscription response");
+    let response = receive_message(&mut player_stream)
+        .map_err(|_| PlayerError::RadarResponseFailed)?;
     if !response.contains("Ok") {
-        eprintln!("Failed to subscribe player: {}", response);
-        return;
+        return Err(PlayerError::SubscriptionFailed(response).into());
     }
     println!("Server response for player {}: {}", player_name, response);
 
     // get the next response from the server that contains the radar view
-    let response = receive_message(&mut player_stream).expect("Failed to receive radar response");
+    let response = receive_message(&mut player_stream)
+        .map_err(|_| PlayerError::RadarResponseFailed)?;
     println!(
         "Player {} received radar response: {}",
         player_name, response
     );
 
-    search_for_exit(player_name, player_stream, response);
+    search_for_exit(player_name, player_stream, response)?;
 
     // fixme remove, only for testing
     // choose_direction_by_hand(player_name, player_stream);
+
+    Ok(())
 }
 
 /**
@@ -114,12 +118,12 @@ fn search_for_exit(
     player_name: String,
     mut player_stream: TcpStream,
     initial_radar_response: String,
-) {
+) -> Result<(), Error> {
     // Parse the radar to get the initial state of the labyrinth
-    let (mut cells, mut horizontal_passages, mut vertical_passages) =
+    let (mut _cells, mut horizontal_passages, mut vertical_passages) =
         parse_radar_response(&initial_radar_response);
     // Initial player direction
-    let mut current_direction = Direction::Right; // allways try to go right first
+    let mut current_direction = Direction::Right; // always try to go right first
 
     // main loop for player movement
     loop {
@@ -130,15 +134,16 @@ fn search_for_exit(
         // Send the current movement action
         let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
 
-        send_message(&mut player_stream, &action_message).expect("Failed to send action");
+        send_message(&mut player_stream, &action_message)
+            .map_err(|_| PlayerError::ActionFailed)?;
         println!(
             "Player {} sent action: {:?}",
             player_name, current_direction
         );
 
         // Receive the server's response to the action
-        let mut action_response =
-            receive_message(&mut player_stream).expect("Failed to receive action response");
+        let mut action_response = receive_message(&mut player_stream)
+            .map_err(|_| PlayerError::RadarResponseFailed)?;
         println!(
             "Player {} received response: {}",
             player_name, action_response
@@ -146,11 +151,11 @@ fn search_for_exit(
 
         if action_response.contains("Hint") {
             println!("Player {} found a hint!", player_name);
-            handle_hint(&player_name, &action_response);
+            handle_hint(&player_name, &action_response)?;
 
             // get next message from server to get the radar view
-            action_response =
-                receive_message(&mut player_stream).expect("Failed to receive action response");
+            action_response = receive_message(&mut player_stream)
+                .map_err(|_| PlayerError::RadarResponseFailed)?;
             println!(
                 "Player {} received response: {}",
                 player_name, action_response
@@ -160,31 +165,31 @@ fn search_for_exit(
         if action_response.contains("Challenge") {
             println!("Player {} found a challenge!", player_name);
             // cannot move until challenge is solved
-            resolve_challenge(&player_name, &mut player_stream, &action_response);
+            resolve_challenge(&player_name, &mut player_stream, &action_response)?;
 
             // get next message from server to get the radar view
-            action_response =
-                receive_message(&mut player_stream).expect("Failed to receive action response");
+            action_response = receive_message(&mut player_stream)
+                .map_err(|_| PlayerError::RadarResponseFailed)?;
             if action_response.contains("RadarView") {
                 // Log the challenge solution in projectRoot/log/challenge.log
                 log_message(
                     "challenge",
                     &format!("Player {} successfully solved the challenge\n", player_name),
-                );
+                )?;
             }
         }
 
-        player_stream.flush().expect("Failed to flush stream");
+        player_stream.flush().map_err(|_| PlayerError::ActionFailed)?;
 
         // Check for exit condition
         if action_response.contains("FoundExit") {
             println!("Player {} found the exit!", player_name);
             // terminate the player thread
-            return;
+            return Ok(());
         }
 
         // parse and update cells, horizontal and vertical passages
-        (cells, horizontal_passages, vertical_passages) = parse_radar_response(&action_response);
+        (_cells, horizontal_passages, vertical_passages) = parse_radar_response(&action_response);
         current_direction = Direction::Right; // Reset the direction to right
 
         // timeout 1/100 of a second
@@ -201,7 +206,7 @@ fn search_for_exit(
     }
 }
 
-fn handle_hint(player_name: &String, hint: &String) {
+fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     // Log the hint in projectRoot/log/hint.log
     debug!("Received a hint: {}", hint);
 
@@ -209,7 +214,7 @@ fn handle_hint(player_name: &String, hint: &String) {
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(hint) {
         if let Some(secret_val) = json_val["Hint"]["Secret"].as_u64() {
             if let Some(map) = SECRET_MAP.get() {
-                let mut map = map.lock().unwrap();
+                let mut map = map.lock().map_err(|_| PlayerError::HintHandlingFailed)?;
                 map.insert(player_name.clone(), secret_val);
                 info!("Stored secret for player {}: {}", player_name, secret_val);
             }
@@ -219,7 +224,7 @@ fn handle_hint(player_name: &String, hint: &String) {
     let log_dir = "log";
     if let Err(e) = std::fs::create_dir_all(log_dir) {
         error!("Failed to create log directory: {}", e);
-        return;
+        return Ok(());
     }
 
     let hint_log_file = format!("{}/hint.log", log_dir);
@@ -235,67 +240,62 @@ fn handle_hint(player_name: &String, hint: &String) {
     } else {
         info!("Hint logged to {}", hint_log_file);
     }
+
+    Ok(())
 }
 
-fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challenge: &String) {
-    if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(challenge) {
-        // Try to read "Modulo" first, if not present, try "SecretSumModulo"
-        let mod_val = json_val["Challenge"]["Modulo"]
-            .as_u64()
-            .or(json_val["Challenge"]["SecretSumModulo"].as_u64());
+fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challenge: &String) -> Result<(), Error> {
+    // Try to read "Modulo" first, if not present, try "SecretSumModulo"
+    let json_val = serde_json::from_str::<serde_json::Value>(challenge)
+        .map_err(|_| PlayerError::ChallengeResolutionFailed)?;
 
-        if let Some(mod_val) = mod_val {
-            // Now we have the modulo value from the challenge
-            if let Some(map) = SECRET_MAP.get() {
-                let map = map.lock().unwrap();
-                let secret_hints: Vec<&u64> = map
-                    .iter()
-                    // .filter(|(name, _)| *name != player_name)
-                    .map(|(_, secret)| secret)
-                    // log for debugging
-                    .inspect(|secret| println!("Secret: {}", secret))
-                    .collect();
+    let mod_val = json_val["Challenge"]["Modulo"]
+        .as_u64()
+        .or(json_val["Challenge"]["SecretSumModulo"].as_u64())
+        .ok_or_else(|| PlayerError::ChallengeResolutionFailed)?;
 
-                // Calculate the sum of the secret hints
-                let sum_of_secret_hint: u128 = secret_hints.iter().map(|&hint| *hint as u128).sum();
+    if let Some(map) = SECRET_MAP.get() {
+        // Now we have the modulo value from the challenge
+        let map = map.lock().map_err(|_| PlayerError::ChallengeResolutionFailed)?;
+        let secret_hints: Vec<&u64> = map
+            .iter()
+            // .filter(|(name, _)| *name != player_name)
+            .map(|(_, secret)| secret)
+            // log for debugging
+            .inspect(|secret| println!("Secret: {}", secret))
+            .collect();
 
-                let modulo_result = (sum_of_secret_hint % mod_val as u128) as u64;
+        // Calculate the sum of the secret hints
+        let sum_of_secret_hint: u128 = secret_hints.iter().map(|&hint| *hint as u128).sum();
 
-                println!(
-                    "Player {} resolving challenge with sum {} modulo {} = {}",
-                    player_name, sum_of_secret_hint, mod_val, modulo_result
-                );
+        let modulo_result = (sum_of_secret_hint % mod_val as u128) as u64;
 
-                // Construct solution message
-                let solution_message = Message::Action(Action::SolveChallenge(Answer {
-                    answer: modulo_result.to_string(),
-                }));
+        println!(
+            "Player {} resolving challenge with sum {} modulo {} = {}",
+            player_name, sum_of_secret_hint, mod_val, modulo_result
+        );
 
-                // Send the solution message
-                if let Err(e) = send_message(player_stream, &solution_message) {
-                    error!("Failed to send challenge solution: {}", e);
-                } else {
-                    info!(
-                        "Sent challenge solution for player {}: {}",
-                        player_name, modulo_result
-                    );
+        // Construct solution message
+        let solution_message = Message::Action(Action::SolveChallenge(Answer {
+            answer: modulo_result.to_string(),
+        }));
 
-                    // Log the challenge solution
-                    log_message(
-                        "challenge",
-                        &format!("Player {} found: {}", player_name, challenge),
-                    );
-                }
-            }
-        } else {
-            error!(
-                "No 'Modulo' or 'SecretSumModulo' field found in challenge JSON: {}",
-                challenge
-            );
-        }
-    } else {
-        error!("Failed to parse challenge JSON: {}", challenge);
+        // Send the solution message
+        send_message(player_stream, &solution_message)
+            .map_err(|_| PlayerError::ActionFailed)?;
+        info!(
+            "Sent challenge solution for player {}: {}",
+            player_name, modulo_result
+        );
+
+        // Log the challenge solution
+        log_message(
+            "challenge",
+            &format!("Player {} found: {}", player_name, challenge),
+        )?;
     }
+
+    Ok(())
 }
 
 // fixme remove, only for testing
