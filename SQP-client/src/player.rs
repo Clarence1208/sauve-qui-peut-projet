@@ -21,29 +21,6 @@ pub(crate) enum Boundary {
     Error,
 }
 
-impl Boundary {
-    pub(crate) fn clone(&self) -> Boundary {
-        match self {
-            Boundary::Undefined => Boundary::Undefined,
-            Boundary::Open => Boundary::Open,
-            Boundary::Wall => Boundary::Wall,
-            Boundary::Error => Boundary::Error,
-        }
-    }
-}
-
-// impl PartialEq for Boundary {
-//     fn eq(&self, other: &Self) -> bool {
-//         matches!(
-//             (self, other),
-//             (Boundary::Undefined, Boundary::Undefined)
-//                 | (Boundary::Open, Boundary::Open)
-//                 | (Boundary::Wall, Boundary::Wall)
-//                 | (Boundary::Error, Boundary::Error)
-//         )
-//     }
-// }
-
 /**
  * The Entity enum represents the different types of entities in the labyrinth.
  */
@@ -55,18 +32,6 @@ enum Entity {
     Monster,
 }
 
-// impl PartialEq for Entity {
-//     fn eq(&self, other: &Self) -> bool {
-//         matches!(
-//             (self, other),
-//             (Entity::None, Entity::None)
-//                 | (Entity::Ally, Entity::Ally)
-//                 | (Entity::Enemy, Entity::Enemy)
-//                 | (Entity::Monster, Entity::Monster)
-//         )
-//     }
-// }
-
 /**
  * The Item enum represents the different types of items in the labyrinth.
  */
@@ -76,15 +41,6 @@ enum Item {
     Hint,
     Goal,
 }
-
-// impl PartialEq for Item {
-//     fn eq(&self, other: &Self) -> bool {
-//         matches!(
-//             (self, other),
-//             (Item::None, Item::None) | (Item::Hint, Item::Hint) | (Item::Goal, Item::Goal)
-//         )
-//     }
-// }
 
 /**
  * The RadarCell struct represents a cell in the radar view.

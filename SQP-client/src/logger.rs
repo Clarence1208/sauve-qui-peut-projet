@@ -77,7 +77,7 @@ fn write_separator(path: String, file: &mut File, metadata: Metadata) -> Result<
 /// Writes a single line (with a trailing newline) to the specified log category.
 ///
 /// # Arguments
-///
+///x
 /// * `category` - The name of the log category (e.g. "hint", "challenge").
 /// * `message` - The content to be written to the log file.
 pub fn log_message(category: &str, message: &str) {
