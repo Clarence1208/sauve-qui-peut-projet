@@ -2,18 +2,18 @@ use std::fmt;
 
 #[derive(Debug, PartialEq)]
 pub enum NetworkError {
-    ConnectionFailed,
-    SendLengthFailed,
-    SendPayloadFailed,
-    ReadLengthFailed,
-    ReadPayloadFailed,
-    Utf8ConversionFailed,
+    ConnectionFailed(String),
+    SendLengthFailed(String),
+    SendPayloadFailed(String),
+    ReadLengthFailed(String),
+    ReadPayloadFailed(String),
+    Utf8ConversionFailed(String),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum ProtocolError {
-    SerializationFailed,
-    ResponseParsingFailed,
+    SerializationFailed(String),
+    ResponseParsingFailed(String),
     TokenNotFound,
     InvalidArguments,
     InvalidAddressFormat,
@@ -22,11 +22,11 @@ pub enum ProtocolError {
 
 #[derive(Debug, PartialEq)]
 pub enum LogError {
-    DirectoryCreationFailed,
-    FileOpenFailed,
-    MetadataFailed,
-    WriteFailed,
-    MutexPoisoned,
+    DirectoryCreationFailed(String),
+    FileOpenFailed(String),
+    MetadataFailed(String),
+    WriteFailed(String),
+    MutexPoisoned(String),
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,22 +39,34 @@ pub enum DecodeError {
 #[derive(Debug, PartialEq)]
 pub enum PlayerError {
     SubscriptionFailed(String),
-    ActionFailed,
-    RadarResponseFailed,
-    HintHandlingFailed,
-    ChallengeResolutionFailed,
+    ActionFailed(String),
+    RadarResponseFailed(String),
+    HintHandlingFailed(String),
+    ChallengeResolutionFailed(String),
     InvalidRadarData,
 }
 
 impl fmt::Display for NetworkError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            NetworkError::ConnectionFailed => write!(f, "Failed to connect to server"),
-            NetworkError::SendLengthFailed => write!(f, "Failed to send message length"),
-            NetworkError::SendPayloadFailed => write!(f, "Failed to send message payload"),
-            NetworkError::ReadLengthFailed => write!(f, "Failed to read message length"),
-            NetworkError::ReadPayloadFailed => write!(f, "Failed to read message payload"),
-            NetworkError::Utf8ConversionFailed => write!(f, "Invalid UTF-8 message received"),
+            NetworkError::ConnectionFailed(msg) => {
+                write!(f, "Failed to connect to server: {}", msg)
+            }
+            NetworkError::SendLengthFailed(msg) => {
+                write!(f, "Failed to send message length: {}", msg)
+            }
+            NetworkError::SendPayloadFailed(msg) => {
+                write!(f, "Failed to send message payload: {}", msg)
+            }
+            NetworkError::ReadLengthFailed(msg) => {
+                write!(f, "Failed to read message length: {}", msg)
+            }
+            NetworkError::ReadPayloadFailed(msg) => {
+                write!(f, "Failed to read message payload: {}", msg)
+            }
+            NetworkError::Utf8ConversionFailed(msg) => {
+                write!(f, "Invalid UTF-8 message received: {}", msg)
+            }
         }
     }
 }
@@ -62,8 +74,12 @@ impl fmt::Display for NetworkError {
 impl fmt::Display for ProtocolError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ProtocolError::SerializationFailed => write!(f, "Failed to serialize message"),
-            ProtocolError::ResponseParsingFailed => write!(f, "Failed to parse server response"),
+            ProtocolError::SerializationFailed(msg) => {
+                write!(f, "Failed to serialize message: {}", msg)
+            }
+            ProtocolError::ResponseParsingFailed(msg) => {
+                write!(f, "Failed to parse server response: {}", msg)
+            }
             ProtocolError::TokenNotFound => write!(f, "Registration token not found"),
             ProtocolError::InvalidArguments => write!(f, "Usage: worker <server_address>"),
             ProtocolError::InvalidAddressFormat => {
@@ -77,11 +93,13 @@ impl fmt::Display for ProtocolError {
 impl fmt::Display for LogError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LogError::DirectoryCreationFailed => write!(f, "Failed to create log directory"),
-            LogError::FileOpenFailed => write!(f, "Failed to open log file"),
-            LogError::MetadataFailed => write!(f, "Failed to retrieve file metadata"),
-            LogError::WriteFailed => write!(f, "Failed to write to log file"),
-            LogError::MutexPoisoned => write!(f, "Mutex poisoned"),
+            LogError::DirectoryCreationFailed(msg) => {
+                write!(f, "Failed to create log directory: {}", msg)
+            }
+            LogError::FileOpenFailed(msg) => write!(f, "Failed to open log file: {}", msg),
+            LogError::MetadataFailed(msg) => write!(f, "Failed to retrieve file metadata: {}", msg),
+            LogError::WriteFailed(msg) => write!(f, "Failed to write to log file: {}", msg),
+            LogError::MutexPoisoned(msg) => write!(f, "Mutex poisoned: {}", msg),
         }
     }
 }
@@ -104,10 +122,14 @@ impl fmt::Display for PlayerError {
             PlayerError::SubscriptionFailed(msg) => {
                 write!(f, "Failed to subscribe player: {}", msg)
             }
-            PlayerError::ActionFailed => write!(f, "Failed to send action"),
-            PlayerError::RadarResponseFailed => write!(f, "Failed to receive radar response"),
-            PlayerError::HintHandlingFailed => write!(f, "Failed to handle hint"),
-            PlayerError::ChallengeResolutionFailed => write!(f, "Failed to resolve challenge"),
+            PlayerError::ActionFailed(msg) => write!(f, "Failed to send action: {}", msg),
+            PlayerError::RadarResponseFailed(msg) => {
+                write!(f, "Failed to receive radar response: {}", msg)
+            }
+            PlayerError::HintHandlingFailed(msg) => write!(f, "Failed to handle hint: {}", msg),
+            PlayerError::ChallengeResolutionFailed(msg) => {
+                write!(f, "Failed to resolve challenge: {}", msg)
+            }
             PlayerError::InvalidRadarData => write!(f, "Invalid radar data"),
         }
     }

@@ -1,16 +1,19 @@
 use crate::decoder::decode;
+use crate::error::{Error, NetworkError, PlayerError};
 use crate::logger::log_message;
 use crate::models::{turn_left, Direction};
 use crate::request_models::{Action, Answer, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
 use crate::SECRET_MAP;
-use crate::error::{Error, NetworkError, PlayerError};
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use serde_json::json;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::fmt;
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
 
 /**
  * The Boundary enum represents the different types of boundaries in the labyrinth.
@@ -71,7 +74,7 @@ pub(crate) fn start_player_thread(
     server_address: String,
 ) -> Result<(), Error> {
     let mut player_stream = TcpStream::connect(server_address)
-        .map_err(|_| NetworkError::ConnectionFailed)?;
+        .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
     println!("Connected for player: {}", player_name);
 
     // Subscribe the player
@@ -80,11 +83,11 @@ pub(crate) fn start_player_thread(
         registration_token: registration_token.clone(),
     });
     send_message(&mut player_stream, &subscribe_player_message)
-        .map_err(|_| PlayerError::SubscriptionFailed("Failed to subscribe player".to_string()))?;
+        .map_err(|e| PlayerError::SubscriptionFailed(e.to_string()))?;
     println!("Subscribed player: {}", player_name);
 
     let response = receive_message(&mut player_stream)
-        .map_err(|_| PlayerError::RadarResponseFailed)?;
+        .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
     if !response.contains("Ok") {
         return Err(PlayerError::SubscriptionFailed(response).into());
     }
@@ -92,7 +95,7 @@ pub(crate) fn start_player_thread(
 
     // get the next response from the server that contains the radar view
     let response = receive_message(&mut player_stream)
-        .map_err(|_| PlayerError::RadarResponseFailed)?;
+        .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
     println!(
         "Player {} received radar response: {}",
         player_name, response
@@ -135,7 +138,7 @@ fn search_for_exit(
         let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
 
         send_message(&mut player_stream, &action_message)
-            .map_err(|_| PlayerError::ActionFailed)?;
+            .map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
         println!(
             "Player {} sent action: {:?}",
             player_name, current_direction
@@ -143,7 +146,7 @@ fn search_for_exit(
 
         // Receive the server's response to the action
         let mut action_response = receive_message(&mut player_stream)
-            .map_err(|_| PlayerError::RadarResponseFailed)?;
+            .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
         println!(
             "Player {} received response: {}",
             player_name, action_response
@@ -155,7 +158,7 @@ fn search_for_exit(
 
             // get next message from server to get the radar view
             action_response = receive_message(&mut player_stream)
-                .map_err(|_| PlayerError::RadarResponseFailed)?;
+                .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
             println!(
                 "Player {} received response: {}",
                 player_name, action_response
@@ -169,7 +172,7 @@ fn search_for_exit(
 
             // get next message from server to get the radar view
             action_response = receive_message(&mut player_stream)
-                .map_err(|_| PlayerError::RadarResponseFailed)?;
+                .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
             if action_response.contains("RadarView") {
                 // Log the challenge solution in projectRoot/log/challenge.log
                 log_message(
@@ -179,7 +182,7 @@ fn search_for_exit(
             }
         }
 
-        player_stream.flush().map_err(|_| PlayerError::ActionFailed)?;
+        player_stream.flush().map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
 
         // Check for exit condition
         if action_response.contains("FoundExit") {
@@ -214,7 +217,7 @@ fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(hint) {
         if let Some(secret_val) = json_val["Hint"]["Secret"].as_u64() {
             if let Some(map) = SECRET_MAP.get() {
-                let mut map = map.lock().map_err(|_| PlayerError::HintHandlingFailed)?;
+                let mut map = map.lock().map_err(|e| PlayerError::HintHandlingFailed(e.to_string()))?;
                 map.insert(player_name.clone(), secret_val);
                 info!("Stored secret for player {}: {}", player_name, secret_val);
             }
@@ -247,16 +250,16 @@ fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
 fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challenge: &String) -> Result<(), Error> {
     // Try to read "Modulo" first, if not present, try "SecretSumModulo"
     let json_val = serde_json::from_str::<serde_json::Value>(challenge)
-        .map_err(|_| PlayerError::ChallengeResolutionFailed)?;
+        .map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
 
     let mod_val = json_val["Challenge"]["Modulo"]
         .as_u64()
         .or(json_val["Challenge"]["SecretSumModulo"].as_u64())
-        .ok_or_else(|| PlayerError::ChallengeResolutionFailed)?;
+        .ok_or_else(|| PlayerError::ChallengeResolutionFailed("Missing modulo value in challenge".to_string()))?;
 
     if let Some(map) = SECRET_MAP.get() {
         // Now we have the modulo value from the challenge
-        let map = map.lock().map_err(|_| PlayerError::ChallengeResolutionFailed)?;
+        let map = map.lock().map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
         let secret_hints: Vec<&u64> = map
             .iter()
             // .filter(|(name, _)| *name != player_name)
@@ -282,7 +285,7 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
 
         // Send the solution message
         send_message(player_stream, &solution_message)
-            .map_err(|_| PlayerError::ActionFailed)?;
+            .map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
         info!(
             "Sent challenge solution for player {}: {}",
             player_name, modulo_result

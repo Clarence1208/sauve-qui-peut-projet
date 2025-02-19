@@ -8,6 +8,7 @@ mod server_utils;
 mod logger;
 mod error;
 
+use crate::error::{Error, NetworkError, ProtocolError};
 use player::start_player_thread;
 use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
@@ -15,7 +16,6 @@ use std::collections::HashMap;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::{env, thread};
-use crate::error::{Error, NetworkError, ProtocolError};
 
 static SECRET_MAP: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
 
@@ -39,7 +39,7 @@ fn main() -> Result<(), Error> {
 
     // Step 2: Connect to the server
     let mut team_stream = TcpStream::connect(server_address)
-        .map_err(|_| NetworkError::ConnectionFailed)?;
+        .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
     println!("Connected to server at {}", server_address);
 
     // Initialize the global map
