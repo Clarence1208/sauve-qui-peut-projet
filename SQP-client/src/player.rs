@@ -217,7 +217,7 @@ fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(hint) {
         if let Some(secret_val) = json_val["Hint"]["Secret"].as_u64() {
             if let Some(map) = SECRET_MAP.get() {
-                let mut map = map.lock().map_err(|e| PlayerError::HintHandlingFailed(e.to_string()))?;
+                let mut map = map.write().map_err(|e| PlayerError::HintHandlingFailed(e.to_string()))?;
                 map.insert(player_name.clone(), secret_val);
                 info!("Stored secret for player {}: {}", player_name, secret_val);
             }
@@ -259,7 +259,7 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
 
     if let Some(map) = SECRET_MAP.get() {
         // Now we have the modulo value from the challenge
-        let map = map.lock().map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
+        let map = map.read().map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
         let secret_hints: Vec<&u64> = map
             .iter()
             // .filter(|(name, _)| *name != player_name)

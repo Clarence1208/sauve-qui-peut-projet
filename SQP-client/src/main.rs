@@ -14,10 +14,10 @@ use request_models::{Message, RegisterTeam};
 use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::collections::HashMap;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, RwLock, OnceLock};
 use std::{env, thread};
 
-static SECRET_MAP: OnceLock<Arc<Mutex<HashMap<String, u64>>>> = OnceLock::new();
+static SECRET_MAP: OnceLock<Arc<RwLock<HashMap<String, u64>>>> = OnceLock::new();
 
 fn main() -> Result<(), Error> {
     // Setup logging
@@ -43,8 +43,7 @@ fn main() -> Result<(), Error> {
     println!("Connected to server at {}", server_address);
 
     // Initialize the global map
-    // fixme try RwLock instead of Mutex as the professor suggested
-    SECRET_MAP.set(Arc::new(Mutex::new(HashMap::new()))).unwrap();
+    SECRET_MAP.set(Arc::new(RwLock::new(HashMap::new()))).unwrap();
 
     // Step 3: Register the team
     // fixme random team name generation for testing
