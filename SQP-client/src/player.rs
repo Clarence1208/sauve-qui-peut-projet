@@ -1,7 +1,7 @@
 use crate::decoder::decode;
 use crate::error::{Error, NetworkError, PlayerError};
 use crate::logger::log_message;
-use crate::models::{turn_left, Direction};
+use crate::models::{turn_left, Direction, MapDirection};
 use crate::request_models::{Action, Answer, Message, SubscribePlayer};
 use crate::server_utils::{receive_message, send_message};
 use crate::SECRET_MAP;
@@ -22,6 +22,7 @@ use std::time::Duration;
 pub(crate) enum Boundary {
     Undefined,
     Open,
+    Checked,
     Wall,
     Error,
 }
@@ -61,6 +62,38 @@ pub(crate) struct RadarCell {
 }
 
 /**
+ * The Coordinates struct represents a x and y position in the map.
+ */
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct Coordinates {
+    position_x: usize,
+    position_y: usize,
+}
+
+/**
+ * The MapCell struct represents a cell in the map.
+ * It contains all possibilites for all its 4 boundaries.
+ * The boundaries are represented by the Boundary enum.
+ */
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct MapCell {
+    north: Boundary,
+    east: Boundary,
+    south: Boundary,
+    west: Boundary,
+    is_player_here: bool,
+}
+
+/**
+ * The NextDirection struct the next Direction the player needs to go and the number of steps he is going to need.
+ */
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+pub(crate) struct NextDirection {
+    direction: MapDirection,
+    steps: u64,
+}
+
+/**
  * The player_thread function represents the main logic for each player thread.
  * It subscribes the player to the server, then enters a loop to solve the labyrinth.
  *
@@ -72,6 +105,7 @@ pub(crate) fn start_player_thread(
     player_name: String,
     registration_token: String,
     server_address: String,
+    use_smart_mode: bool,
 ) -> Result<(), Error> {
     let mut player_stream = TcpStream::connect(server_address)
         .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
@@ -101,7 +135,11 @@ pub(crate) fn start_player_thread(
         player_name, response
     );
 
-    search_for_exit(player_name, player_stream, response)?;
+    if use_smart_mode {
+        search_for_exit_smart(player_name, player_stream, response);
+    } else {
+        search_for_exit(player_name, player_stream, response)?;
+    }
 
     // fixme remove, only for testing
     // choose_direction_by_hand(player_name, player_stream);
@@ -182,7 +220,9 @@ fn search_for_exit(
             }
         }
 
-        player_stream.flush().map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
+        player_stream
+            .flush()
+            .map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
 
         // Check for exit condition
         if action_response.contains("FoundExit") {
@@ -196,7 +236,7 @@ fn search_for_exit(
         current_direction = Direction::Right; // Reset the direction to right
 
         // timeout 1/100 of a second
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        thread::sleep(Duration::from_millis(10));
 
         // Check if movement was blocked
         if action_response.contains("CannotPassThroughWall") {
@@ -209,6 +249,249 @@ fn search_for_exit(
     }
 }
 
+/**
+ * The search_for_exit_smart function represents the main logic for each player to solve the labyrinth.
+ * It receives the initial radar response and enters a loop to explore the labyrinth and find the exit.
+ *
+ * @param player_name: String - The name of the player
+ * @param player_stream: TcpStream - The TCP stream for the player
+ * @param initial_radar_response: String - The initial radar response from the server
+ */
+fn search_for_exit_smart(
+    player_name: String,
+    mut player_stream: TcpStream,
+    initial_radar_response: String,
+) -> Result<(), Error> {
+    // Parse the radar to get the initial state of the labyrinth
+    let mut map = parse_radar_response_smart(&initial_radar_response);
+    // Initial player direction
+    let mut north_at: MapDirection = MapDirection::North;
+
+    // main loop for player movement
+    loop {
+        let next_direction = find_closest_open(&mut map, Vec::new(), 0);
+        println!(
+            "Next direction: {:?} with {} steps",
+            next_direction.direction, next_direction.steps
+        );
+        println!("North at: {:?}", north_at);
+        //     // check if the player can go right else try front then left then back
+        //     while !is_direction_open(&current_direction, &horizontal_passages, &vertical_passages) {
+        //         current_direction = turn_left(&current_direction);
+        //     }
+        //     // Send the current movement action
+
+        let mut current_direction = Direction::Front;
+        if north_at == MapDirection::North {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Left;
+            }
+        } else if north_at == MapDirection::East {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Back;
+            }
+        } else if north_at == MapDirection::South {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Front;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Right;
+            }
+        } else if north_at == MapDirection::West {
+            if next_direction.direction == MapDirection::North {
+                current_direction = Direction::Right;
+            } else if next_direction.direction == MapDirection::East {
+                current_direction = Direction::Back;
+            } else if next_direction.direction == MapDirection::South {
+                current_direction = Direction::Left;
+            } else if next_direction.direction == MapDirection::West {
+                current_direction = Direction::Front;
+            }
+        }
+
+        calculate_next_north(&mut north_at, &current_direction);
+
+        print_map(&map);
+        let action_message = Message::Action(Action::MoveTo(current_direction.clone()));
+
+        send_message(&mut player_stream, &action_message)
+            .map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
+        println!(
+            "Player {} sent action: {:?}",
+            player_name, current_direction
+        );
+
+        // Receive the server's response to the action
+        let mut action_response = receive_message(&mut player_stream)
+            .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
+        println!(
+            "Player {} received response: {}",
+            player_name, action_response
+        );
+
+        if action_response.contains("Hint") {
+            println!("Player {} found a hint!", player_name);
+            handle_hint(&player_name, &action_response)?;
+
+            // get next message from server to get the radar view
+            action_response = receive_message(&mut player_stream)
+                .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
+            println!(
+                "Player {} received response: {}",
+                player_name, action_response
+            );
+        }
+
+        if action_response.contains("Challenge") {
+            println!("Player {} found a challenge!", player_name);
+            // cannot move until challenge is solved
+            resolve_challenge(&player_name, &mut player_stream, &action_response)?;
+
+            // get next message from server to get the radar view
+            action_response = receive_message(&mut player_stream)
+                .map_err(|e| PlayerError::RadarResponseFailed(e.to_string()))?;
+            if action_response.contains("RadarView") {
+                // Log the challenge solution in projectRoot/log/challenge.log
+                log_message(
+                    "challenge",
+                    &format!("Player {} successfully solved the challenge\n", player_name),
+                )?;
+            }
+        }
+
+        player_stream
+            .flush()
+            .map_err(|e| PlayerError::ActionFailed(e.to_string()))?;
+
+        // Check for exit condition
+        if action_response.contains("FoundExit") {
+            println!("Player {} found the exit!", player_name);
+            // terminate the player thread
+            return Ok(());
+        }
+
+        let mut map_new = parse_radar_response_smart(&action_response);
+        map_new = rotate_map(map_new, next_direction.direction);
+        map = update_map(&mut map, map_new, next_direction.direction).to_vec();
+
+        // timeout 1/100 of a second
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn calculate_next_north(north_at: &mut MapDirection, current_direction: &Direction) {
+    if current_direction == &Direction::Right {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::East;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::South;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::North;
+        }
+    } else if current_direction == &Direction::Left {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::North;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::East;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::South;
+        }
+    } else if current_direction == &Direction::Back {
+        if *north_at == MapDirection::North {
+            *north_at = MapDirection::South;
+        } else if *north_at == MapDirection::East {
+            *north_at = MapDirection::West;
+        } else if *north_at == MapDirection::South {
+            *north_at = MapDirection::North;
+        } else if *north_at == MapDirection::West {
+            *north_at = MapDirection::East;
+        }
+    }
+}
+
+fn print_map(map: &Vec<Vec<MapCell>>) {
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if map[i][j].north == Boundary::Wall {
+                print!("•-");
+            } else if map[i][j].north == Boundary::Open {
+                print!("• ");
+            } else if map[i][j].north == Boundary::Checked {
+                print!("•C");
+            } else {
+                print!("•*");
+            }
+            if j == map[i].len() - 1 {
+                println!("•");
+            }
+        }
+        for j in 0..map[i].len() {
+            if map[i][j].west == Boundary::Wall {
+                print!("|");
+            } else if map[i][j].west == Boundary::Open {
+                print!(" ");
+            } else if map[i][j].west == Boundary::Checked {
+                print!("C");
+            } else {
+                print!("*");
+            }
+            if map[i][j].is_player_here {
+                print!("P");
+            } else {
+                print!(" ");
+            }
+            if j == map[i].len() - 1 {
+                if map[i][j].east == Boundary::Wall {
+                    print!("|");
+                } else if map[i][j].east == Boundary::Open {
+                    print!(" ");
+                } else if map[i][j].east == Boundary::Checked {
+                    print!("C");
+                } else {
+                    print!("*");
+                }
+            }
+        }
+        if i == map.len() - 1 {
+            println!();
+            for j in 0..map[i].len() {
+                if map[i][j].south == Boundary::Wall {
+                    print!("•-");
+                } else if map[i][j].south == Boundary::Open {
+                    print!("• ");
+                } else if map[i][j].south == Boundary::Checked {
+                    print!("•C");
+                } else {
+                    print!("•*");
+                }
+                if j == map[i].len() - 1 {
+                    println!("•");
+                }
+            }
+        }
+        println!();
+    }
+}
+
 fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     // Log the hint in projectRoot/log/hint.log
     debug!("Received a hint: {}", hint);
@@ -217,7 +500,9 @@ fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(hint) {
         if let Some(secret_val) = json_val["Hint"]["Secret"].as_u64() {
             if let Some(map) = SECRET_MAP.get() {
-                let mut map = map.write().map_err(|e| PlayerError::HintHandlingFailed(e.to_string()))?;
+                let mut map = map
+                    .write()
+                    .map_err(|e| PlayerError::HintHandlingFailed(e.to_string()))?;
                 map.insert(player_name.clone(), secret_val);
                 info!("Stored secret for player {}: {}", player_name, secret_val);
             }
@@ -247,7 +532,11 @@ fn handle_hint(player_name: &String, hint: &String) -> Result<(), Error> {
     Ok(())
 }
 
-fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challenge: &String) -> Result<(), Error> {
+fn resolve_challenge(
+    player_name: &String,
+    player_stream: &mut TcpStream,
+    challenge: &String,
+) -> Result<(), Error> {
     // Try to read "Modulo" first, if not present, try "SecretSumModulo"
     let json_val = serde_json::from_str::<serde_json::Value>(challenge)
         .map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
@@ -255,11 +544,15 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
     let mod_val = json_val["Challenge"]["Modulo"]
         .as_u64()
         .or(json_val["Challenge"]["SecretSumModulo"].as_u64())
-        .ok_or_else(|| PlayerError::ChallengeResolutionFailed("Missing modulo value in challenge".to_string()))?;
+        .ok_or_else(|| {
+            PlayerError::ChallengeResolutionFailed("Missing modulo value in challenge".to_string())
+        })?;
 
     if let Some(map) = SECRET_MAP.get() {
         // Now we have the modulo value from the challenge
-        let map = map.read().map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
+        let map = map
+            .read()
+            .map_err(|e| PlayerError::ChallengeResolutionFailed(e.to_string()))?;
         let secret_hints: Vec<&u64> = map
             .iter()
             // .filter(|(name, _)| *name != player_name)
@@ -299,6 +592,436 @@ fn resolve_challenge(player_name: &String, player_stream: &mut TcpStream, challe
     }
 
     Ok(())
+}
+
+fn find_closest_open(
+    map: &mut Vec<Vec<MapCell>>,
+    previous_move: Vec<Coordinates>,
+    how_deep: u64,
+) -> NextDirection {
+    if how_deep > 20 {
+        return NextDirection {
+            direction: MapDirection::North,
+            steps: 999,
+        };
+    }
+
+    let mut player_x = 0;
+    let mut player_y = 0;
+
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if map[i][j].is_player_here {
+                player_x = i;
+                player_y = j;
+            }
+        }
+    }
+
+    if map[player_x][player_y].north == Boundary::Open {
+        return NextDirection {
+            direction: MapDirection::North,
+            steps: 1,
+        };
+    } else if map[player_x][player_y].east == Boundary::Open {
+        return NextDirection {
+            direction: MapDirection::East,
+            steps: 1,
+        };
+    } else if map[player_x][player_y].south == Boundary::Open {
+        return NextDirection {
+            direction: MapDirection::South,
+            steps: 1,
+        };
+    } else if map[player_x][player_y].west == Boundary::Open {
+        return NextDirection {
+            direction: MapDirection::West,
+            steps: 1,
+        };
+    }
+
+    let mut less_moves_for_north = NextDirection {
+        direction: MapDirection::North,
+        steps: 999,
+    };
+    let mut less_moves_for_south = NextDirection {
+        direction: MapDirection::South,
+        steps: 999,
+    };
+    let mut less_moves_for_east = NextDirection {
+        direction: MapDirection::East,
+        steps: 999,
+    };
+    let mut less_moves_for_west = NextDirection {
+        direction: MapDirection::West,
+        steps: 999,
+    };
+
+    let mut coordinates = Coordinates {
+        position_x: player_x,
+        position_y: player_y,
+    };
+
+    let mut copy_of_previous_move = previous_move.clone();
+    copy_of_previous_move.push(coordinates);
+
+    if map[player_x][player_y].north == Boundary::Open
+        || map[player_x][player_y].north == Boundary::Checked
+    {
+        if player_x != 0 {
+            let mut found = false;
+            for i in 0..copy_of_previous_move.len() {
+                if copy_of_previous_move[i].position_x == player_x - 1
+                    && copy_of_previous_move[i].position_y == player_y
+                {
+                    found = true;
+                }
+            }
+            if !found {
+                let mut temp_map = map.clone();
+                temp_map[player_x][player_y].is_player_here = false;
+                temp_map[player_x - 1][player_y].is_player_here = true;
+                less_moves_for_north =
+                    find_closest_open(&mut temp_map, copy_of_previous_move.clone(), how_deep + 1);
+            }
+        }
+    }
+    if map[player_x][player_y].west == Boundary::Open
+        || map[player_x][player_y].west == Boundary::Checked
+    {
+        if player_y != 0 {
+            let mut found = false;
+            for i in 0..copy_of_previous_move.len() {
+                if copy_of_previous_move[i].position_x == player_x
+                    && copy_of_previous_move[i].position_y == player_y - 1
+                {
+                    found = true;
+                }
+            }
+            if !found {
+                let mut temp_map = map.clone();
+                temp_map[player_x][player_y].is_player_here = false;
+                temp_map[player_x][player_y - 1].is_player_here = true;
+                less_moves_for_west =
+                    find_closest_open(&mut temp_map, copy_of_previous_move.clone(), how_deep + 1);
+            }
+        }
+    }
+    if map[player_x][player_y].south == Boundary::Open
+        || map[player_x][player_y].south == Boundary::Checked
+    {
+        if player_x != map.len() - 1 {
+            let mut found = false;
+            for i in 0..copy_of_previous_move.len() {
+                if copy_of_previous_move[i].position_x == player_x + 1
+                    && copy_of_previous_move[i].position_y == player_y
+                {
+                    found = true;
+                }
+            }
+            if !found {
+                let mut temp_map = map.clone();
+                temp_map[player_x][player_y].is_player_here = false;
+                temp_map[player_x + 1][player_y].is_player_here = true;
+                less_moves_for_south =
+                    find_closest_open(&mut temp_map, copy_of_previous_move.clone(), how_deep + 1);
+            }
+        }
+    }
+    if map[player_x][player_y].east == Boundary::Open
+        || map[player_x][player_y].east == Boundary::Checked
+    {
+        if player_y != map[0].len() - 1 {
+            let mut found = false;
+            for i in 0..copy_of_previous_move.len() {
+                if copy_of_previous_move[i].position_x == player_x
+                    && copy_of_previous_move[i].position_y == player_y + 1
+                {
+                    found = true;
+                }
+            }
+            if !found {
+                let mut temp_map = map.clone();
+                temp_map[player_x][player_y].is_player_here = false;
+                temp_map[player_x][player_y + 1].is_player_here = true;
+                less_moves_for_east =
+                    find_closest_open(&mut temp_map, copy_of_previous_move.clone(), how_deep + 1);
+            }
+        }
+    }
+
+    if (less_moves_for_north.steps <= less_moves_for_south.steps)
+        && (less_moves_for_north.steps <= less_moves_for_east.steps)
+        && (less_moves_for_north.steps <= less_moves_for_west.steps)
+    {
+        if less_moves_for_north.steps != 0 {
+            return NextDirection {
+                direction: MapDirection::North,
+                steps: less_moves_for_north.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_west.steps <= less_moves_for_north.steps)
+        && (less_moves_for_west.steps <= less_moves_for_south.steps)
+        && (less_moves_for_west.steps <= less_moves_for_east.steps)
+    {
+        if less_moves_for_west.steps != 0 {
+            return NextDirection {
+                direction: MapDirection::West,
+                steps: less_moves_for_west.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_south.steps <= less_moves_for_north.steps)
+        && (less_moves_for_south.steps <= less_moves_for_east.steps)
+        && (less_moves_for_south.steps <= less_moves_for_west.steps)
+    {
+        if less_moves_for_south.steps != 0 {
+            return NextDirection {
+                direction: MapDirection::South,
+                steps: less_moves_for_south.steps + 1,
+            };
+        }
+    }
+    if (less_moves_for_east.steps <= less_moves_for_north.steps)
+        && (less_moves_for_east.steps <= less_moves_for_south.steps)
+        && (less_moves_for_east.steps <= less_moves_for_west.steps)
+    {
+        if less_moves_for_east.steps != 0 {
+            return NextDirection {
+                direction: MapDirection::East,
+                steps: less_moves_for_east.steps + 1,
+            };
+        }
+    }
+
+    return NextDirection {
+        direction: MapDirection::North,
+        steps: 0,
+    };
+}
+
+fn rotate_map(map: Vec<Vec<MapCell>>, direction: MapDirection) -> Vec<Vec<MapCell>> {
+    let mut new_map = vec![
+        vec![
+            MapCell {
+                north: Boundary::Undefined,
+                east: Boundary::Undefined,
+                south: Boundary::Undefined,
+                west: Boundary::Undefined,
+                is_player_here: false,
+            };
+            map[0].len()
+        ];
+        map.len()
+    ];
+
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if direction == MapDirection::North {
+                new_map[i][j] = map[i][j].clone();
+            } else if direction == MapDirection::East {
+                new_map[j][map.len() - i - 1] = map[i][j].clone();
+                let temp_boundary = new_map[j][map.len() - i - 1].north.clone();
+                new_map[j][map.len() - i - 1].north = new_map[j][map.len() - i - 1].west.clone();
+                new_map[j][map.len() - i - 1].west = new_map[j][map.len() - i - 1].south.clone();
+                new_map[j][map.len() - i - 1].south = new_map[j][map.len() - i - 1].east.clone();
+                new_map[j][map.len() - i - 1].east = temp_boundary;
+            } else if direction == MapDirection::South {
+                new_map[map.len() - i - 1][map[i].len() - j - 1] = map[i][j].clone();
+                let mut temp_boundary = new_map[map.len() - i - 1][map[i].len() - j - 1]
+                    .north
+                    .clone();
+                new_map[map.len() - i - 1][map[i].len() - j - 1].north = new_map[map.len() - i - 1]
+                    [map[i].len() - j - 1]
+                    .south
+                    .clone();
+                new_map[map.len() - i - 1][map[i].len() - j - 1].south = temp_boundary;
+                temp_boundary = new_map[map.len() - i - 1][map[i].len() - j - 1]
+                    .east
+                    .clone();
+                new_map[map.len() - i - 1][map[i].len() - j - 1].east = new_map[map.len() - i - 1]
+                    [map[i].len() - j - 1]
+                    .west
+                    .clone();
+                new_map[map.len() - i - 1][map[i].len() - j - 1].west = temp_boundary;
+            } else if direction == MapDirection::West {
+                new_map[map[i].len() - j - 1][i] = map[i][j].clone();
+                let temp_boundary = new_map[map[i].len() - j - 1][i].north.clone();
+                new_map[map[i].len() - j - 1][i].north =
+                    new_map[map[i].len() - j - 1][i].east.clone();
+                new_map[map[i].len() - j - 1][i].east =
+                    new_map[map[i].len() - j - 1][i].south.clone();
+                new_map[map[i].len() - j - 1][i].south =
+                    new_map[map[i].len() - j - 1][i].west.clone();
+                new_map[map[i].len() - j - 1][i].west = temp_boundary;
+            }
+        }
+    }
+
+    return new_map.clone();
+}
+
+fn update_map(
+    mut map: &mut Vec<Vec<MapCell>>,
+    new_map: Vec<Vec<MapCell>>,
+    direction: MapDirection,
+) -> &mut Vec<Vec<MapCell>> {
+    let mut player_x = 0;
+    let mut player_y = 0;
+    let mut player_moved = false;
+    for i in 0..map.len() - 1 {
+        for j in 0..map[i].len() - 1 {
+            if map[i][j].is_player_here {
+                if !player_moved {
+                    map[i][j].is_player_here = false;
+                    if direction == MapDirection::North {
+                        map[i - 1][j].is_player_here = true;
+                        map[i - 1][j].south = Boundary::Checked;
+                        map[i][j].north = Boundary::Checked;
+                        player_x = i - 1;
+                        player_y = j;
+                        player_moved = true;
+                    } else if direction == MapDirection::East {
+                        map[i][j + 1].is_player_here = true;
+                        map[i][j + 1].west = Boundary::Checked;
+                        map[i][j].east = Boundary::Checked;
+                        player_x = i;
+                        player_y = j + 1;
+                        player_moved = true;
+                    } else if direction == MapDirection::South {
+                        map[i + 1][j].is_player_here = true;
+                        map[i + 1][j].north = Boundary::Checked;
+                        map[i][j].south = Boundary::Checked;
+                        player_x = i + 1;
+                        player_y = j;
+                        player_moved = true;
+                    } else if direction == MapDirection::West {
+                        map[i][j - 1].is_player_here = true;
+                        map[i][j - 1].east = Boundary::Checked;
+                        map[i][j].west = Boundary::Checked;
+                        player_x = i;
+                        player_y = j - 1;
+                        player_moved = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if direction == MapDirection::North {
+        if player_x == 0 {
+            let mut combined_map = vec![
+                vec![
+                    MapCell {
+                        north: Boundary::Undefined,
+                        east: Boundary::Undefined,
+                        south: Boundary::Undefined,
+                        west: Boundary::Undefined,
+                        is_player_here: false,
+                    };
+                    map[0].len()
+                ];
+                map.len() + 1
+            ];
+            for i in 1..combined_map.len() {
+                combined_map[i] = map[i - 1].clone();
+            }
+            *map = combined_map;
+        }
+    } else if direction == MapDirection::East {
+        if player_y == map[0].len() - 1 {
+            let mut combined_map = vec![
+                vec![
+                    MapCell {
+                        north: Boundary::Undefined,
+                        east: Boundary::Undefined,
+                        south: Boundary::Undefined,
+                        west: Boundary::Undefined,
+                        is_player_here: false,
+                    };
+                    map[0].len() + 1
+                ];
+                map.len()
+            ];
+            for i in 0..combined_map.len() {
+                for j in 0..combined_map[i].len() - 1 {
+                    combined_map[i][j] = map[i][j].clone();
+                }
+            }
+            *map = combined_map;
+        }
+    } else if direction == MapDirection::South {
+        if player_x == map.len() - 1 {
+            let mut combined_map = vec![
+                vec![
+                    MapCell {
+                        north: Boundary::Undefined,
+                        east: Boundary::Undefined,
+                        south: Boundary::Undefined,
+                        west: Boundary::Undefined,
+                        is_player_here: false,
+                    };
+                    map[0].len()
+                ];
+                map.len() + 1
+            ];
+            for i in 0..combined_map.len() - 1 {
+                combined_map[i] = map[i].clone();
+            }
+            *map = combined_map;
+        }
+    } else if direction == MapDirection::West {
+        if player_y == 0 {
+            let mut combined_map = vec![
+                vec![
+                    MapCell {
+                        north: Boundary::Undefined,
+                        east: Boundary::Undefined,
+                        south: Boundary::Undefined,
+                        west: Boundary::Undefined,
+                        is_player_here: false,
+                    };
+                    map[0].len() + 1
+                ];
+                map.len()
+            ];
+            for i in 0..combined_map.len() {
+                for j in 1..combined_map[i].len() {
+                    combined_map[i][j] = map[i][j - 1].clone();
+                }
+            }
+            *map = combined_map;
+        }
+    }
+
+    for i in 0..map.len() {
+        for j in 0..map[i].len() {
+            if map[i][j].is_player_here {
+                player_x = i;
+                player_y = j;
+            }
+        }
+    }
+
+    for i in 0..new_map.len() {
+        for j in 0..new_map[i].len() {
+            if map[(player_x + i) - 1][(player_y + j) - 1].north == Boundary::Undefined {
+                map[(player_x + i) - 1][(player_y + j) - 1].north = new_map[i][j].north.clone();
+            }
+            if map[(player_x + i) - 1][(player_y + j) - 1].east == Boundary::Undefined {
+                map[(player_x + i) - 1][(player_y + j) - 1].east = new_map[i][j].east.clone();
+            }
+            if map[(player_x + i) - 1][(player_y + j) - 1].south == Boundary::Undefined {
+                map[(player_x + i) - 1][(player_y + j) - 1].south = new_map[i][j].south.clone();
+            }
+            if map[(player_x + i) - 1][(player_y + j) - 1].west == Boundary::Undefined {
+                map[(player_x + i) - 1][(player_y + j) - 1].west = new_map[i][j].west.clone();
+            }
+        }
+    }
+
+    return map;
 }
 
 // fixme remove, only for testing
@@ -373,7 +1096,7 @@ fn is_direction_open(
     if next_direction == &Direction::Front || next_direction == &Direction::Back {
         println!("Horizontal Passages:");
         for (i, passage) in h_passages.iter().clone().enumerate() {
-            println!("  Passage {}: {:?}", i, passage);
+            println!("Passage {}: {:?}", i, passage);
         }
     }
 
@@ -472,6 +1195,129 @@ pub(crate) fn parse_radar_response(
     );
 
     (cells, horizontal_passages, vertical_passages)
+}
+
+/**
+ * The parse_radar_response function parses the radar response from the server.
+ * It extracts the radar data from the response, decodes the data, and parses the cells, horizontal passages, and vertical passages.
+ * It returns a tuple containing the cells, horizontal passages, and vertical passages.
+ */
+pub(crate) fn parse_radar_response_smart(response: &str) -> (Vec<Vec<MapCell>>) {
+    if response.contains("CannotPassThroughWall")
+        || response.contains("FoundExit")
+        || response.contains("Hint")
+    {
+        return vec![
+            vec![MapCell {
+                north: Boundary::Undefined,
+                east: Boundary::Undefined,
+                south: Boundary::Undefined,
+                west: Boundary::Undefined,
+                is_player_here: false
+            }];
+            3
+        ];
+    }
+
+    // Extract radar data from the response
+    // Response format: {"RadarView":"aeQrajHOapap//a"}
+    let radar_data = response
+        .split("\":\"")
+        .nth(1)
+        .unwrap()
+        .split("\"")
+        .next()
+        .unwrap();
+
+    if radar_data.is_empty() {
+        println!("No radar data found in the response.");
+        panic!("No radar data found in the response.");
+    }
+
+    // Decode the radar data
+    let decoded_radar_data = decode(radar_data).expect("Failed to decode radar data");
+
+    // Print the decoded radar data
+    println!("Decoded radar data: {:?}", decoded_radar_data);
+
+    // Check that the length of the decoded data is 11 bytes
+    // (3 bytes for horizontal passages, 3 bytes for vertical passages, 5 bytes for cells)
+    if decoded_radar_data.len() != 11 {
+        println!("Invalid radar data length: {}", decoded_radar_data.len());
+        panic!("Invalid radar data length: {}", decoded_radar_data.len());
+    }
+
+    // Parse the horizontal passages (12 passages, 2 bits each)
+    let horizontal_passages = parse_passages(&decoded_radar_data[0..3], 12, "Horizontal");
+
+    // Parse les passages verticaux (12 passages, 2 bits chacun)
+    let vertical_passages = parse_passages(&decoded_radar_data[3..6], 12, "Vertical");
+
+    // Parse les cellules (9 cellules, 4 bits chacune)
+    let cells = parse_cells(&decoded_radar_data[6..11]);
+
+    let map = make_map_with_passages(&horizontal_passages, &vertical_passages);
+
+    // println!("Horizontal Passages:");
+    // for (i, passage) in horizontal_passages.iter().enumerate() {
+    //     println!("  Passage {}: {:?}", i, passage);
+    // }
+
+    // println!("Vertical Passages:");
+    // for (i, passage) in vertical_passages.iter().enumerate() {
+    //     println!("  Passage {}: {:?}", i, passage);
+    // }
+
+    // println!("Cells:");
+    // for (i, cell) in cells.iter().enumerate() {
+    //     println!("  Cell {}: {:?}", i, cell);
+    // }
+
+    let two_d_cells: Vec<Vec<RadarCell>> = cells.chunks(3).map(|chunk| chunk.to_vec()).collect();
+
+    // print radar map
+    println!(
+        "{}",
+        get_radar_map_as_string(&two_d_cells, &horizontal_passages, &vertical_passages)
+    );
+
+    map
+}
+
+fn make_map_with_passages(
+    h_passages: &Vec<Boundary>,
+    v_passages: &Vec<Boundary>,
+) -> Vec<Vec<MapCell>> {
+    let mut map = vec![
+        vec![
+            MapCell {
+                north: Boundary::Undefined,
+                east: Boundary::Undefined,
+                south: Boundary::Undefined,
+                west: Boundary::Undefined,
+                is_player_here: false
+            };
+            3
+        ];
+        3
+    ];
+
+    println!("Horizontal Passages 0 : {:?}", h_passages[0]);
+
+    for i in 0..3 {
+        for j in 0..3 {
+            let mut cell = map[i][j].clone();
+            cell.north = h_passages[(j * 3) + i].clone();
+            cell.south = h_passages[((j + 1) * 3) + i].clone();
+            cell.west = v_passages[(j * 3) + i + j].clone();
+            cell.east = v_passages[(j * 3) + i + j + 1].clone();
+            map[j][i] = cell;
+        }
+    }
+
+    map[1][1].is_player_here = true;
+
+    return map;
 }
 
 /**

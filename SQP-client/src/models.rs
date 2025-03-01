@@ -11,6 +11,14 @@ pub(crate) enum Direction {
     Right,
 }
 
+#[derive(Debug, PartialEq, Eq, Hash, Copy, Clone, Serialize, Deserialize)]
+pub(crate) enum MapDirection {
+    North,
+    South,
+    East,
+    West,
+}
+
 /**
  * The turn_right function turns the player to the right.
  *

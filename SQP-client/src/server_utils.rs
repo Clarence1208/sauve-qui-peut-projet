@@ -8,16 +8,17 @@ const LOG_MESSAGE_CATEGORY: &str = "server_message";
 
 ///Send a message to the server
 ///
-/// @param stream: &mut TcpStream - The TCP stream to send the message
-/// @param message: &Message - The message to send
+/// @param stream: &mut TcpStream - The TCP stream to send the message <br>
+/// @param message: &Message - The message to send <br>
 /// @return io::Result<()> - The result of the operation
 pub fn send_message(stream: &mut TcpStream, message: &impl Serialize) -> Result<(), Error> {
     // Log the preparation step
     log_message(LOG_MESSAGE_CATEGORY, "Preparing to send message...")?;
 
     // Serialize the message to JSON
-    let serialized_message = serde_json::to_string(&message)
-        .map_err(|e| ProtocolError::SerializationFailed(format!("JSON serialization error: {}", e)))?;
+    let serialized_message = serde_json::to_string(&message).map_err(|e| {
+        ProtocolError::SerializationFailed(format!("JSON serialization error: {}", e))
+    })?;
     log_message(
         LOG_MESSAGE_CATEGORY,
         &format!("Serialized message: {}", serialized_message),
@@ -61,18 +62,24 @@ pub fn receive_message(stream: &mut TcpStream) -> Result<String, Error> {
     while total_read < message_length {
         match stream.read(&mut message_buffer[total_read..]) {
             Ok(0) => {
-                return Err(NetworkError::ReadPayloadFailed("Connection closed by peer".to_string()).into());
+                return Err(NetworkError::ReadPayloadFailed(
+                    "Connection closed by peer".to_string(),
+                )
+                .into());
             }
             Ok(n) => {
                 total_read += n;
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(NetworkError::ReadPayloadFailed(format!("IO error: {}", e)).into()),
+            Err(e) => {
+                return Err(NetworkError::ReadPayloadFailed(format!("IO error: {}", e)).into())
+            }
         }
     }
 
-    let message = String::from_utf8(message_buffer)
-        .map_err(|e| NetworkError::Utf8ConversionFailed(format!("Invalid UTF-8 sequence: {}", e)))?;
+    let message = String::from_utf8(message_buffer).map_err(|e| {
+        NetworkError::Utf8ConversionFailed(format!("Invalid UTF-8 sequence: {}", e))
+    })?;
 
     Ok(message)
 }
