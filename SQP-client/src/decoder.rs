@@ -1,4 +1,4 @@
-use crate::error::{Error, DecodeError};
+use crate::error::{DecodeError, Error};
 
 fn char_to_value(c: char) -> Option<u8> {
     match c {
@@ -34,9 +34,21 @@ pub(crate) fn decode(input: &str) -> Result<Vec<u8>, Error> {
         }
 
         let v0 = values[i];
-        let v1 = if i + 1 < values.len() { values[i + 1] } else { 0 };
-        let v2 = if i + 2 < values.len() { values[i + 2] } else { 0 };
-        let v3 = if i + 3 < values.len() { values[i + 3] } else { 0 };
+        let v1 = if i + 1 < values.len() {
+            values[i + 1]
+        } else {
+            0
+        };
+        let v2 = if i + 2 < values.len() {
+            values[i + 2]
+        } else {
+            0
+        };
+        let v3 = if i + 3 < values.len() {
+            values[i + 3]
+        } else {
+            0
+        };
 
         let b0 = (v0 << 2) | (v1 >> 4);
         output.push(b0);
@@ -56,7 +68,6 @@ pub(crate) fn decode(input: &str) -> Result<Vec<u8>, Error> {
 
     Ok(output)
 }
-
 
 #[cfg(test)]
 mod tests {

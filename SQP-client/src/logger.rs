@@ -1,19 +1,20 @@
+use crate::error::{Error, LogError};
 use log::{error, info, warn};
 use std::collections::HashMap;
 use std::fs::{File, Metadata, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
 use std::sync::{Mutex, OnceLock};
-use crate::error::{Error, LogError};
 
 /// A global (static) map that holds our file handles for different log categories.
 /// We use `OnceLock` to ensure it's initialized only once.
 /// `Mutex` ensures thread-safe access if multiple threads log concurrently.
-static LOG_MAP: OnceLock<Mutex<HashMap<String, std::fs::File>>> = OnceLock::new();
+static LOG_MAP: OnceLock<Mutex<HashMap<String, File>>> = OnceLock::new();
 
 /// Initializes logging for a given list of categories.
 /// A file named `category.log` will be created (or appended to) in the `log/` directory.
 pub fn init_logging(log_dir: &str, categories: &[&str]) -> Result<(), Error> {
-    std::fs::create_dir_all(log_dir).map_err(|e| LogError::DirectoryCreationFailed(e.to_string()))?;
+    std::fs::create_dir_all(log_dir)
+        .map_err(|e| LogError::DirectoryCreationFailed(e.to_string()))?;
 
     let mut new_map = HashMap::new();
     for &category in categories {
@@ -26,7 +27,9 @@ pub fn init_logging(log_dir: &str, categories: &[&str]) -> Result<(), Error> {
             .map_err(|e| LogError::FileOpenFailed(e.to_string()))?;
 
         // If file is non-empty, write a separator:
-        let metadata = file.metadata().map_err(|e| LogError::MetadataFailed(e.to_string()))?;
+        let metadata = file
+            .metadata()
+            .map_err(|e| LogError::MetadataFailed(e.to_string()))?;
         write_separator(path, &mut file, metadata)?;
 
         new_map.insert(category.to_string(), file);
@@ -42,7 +45,9 @@ pub fn init_logging(log_dir: &str, categories: &[&str]) -> Result<(), Error> {
         Err(_) => {
             info!("init_logging: LOG_MAP was already initialized; merging categories.");
             if let Some(mutex_map) = LOG_MAP.get() {
-                let mut global_map = mutex_map.lock().map_err(|e| LogError::MutexPoisoned(e.to_string()))?;
+                let mut global_map = mutex_map
+                    .lock()
+                    .map_err(|e| LogError::MutexPoisoned(e.to_string()))?;
 
                 for &category in categories {
                     if !global_map.contains_key(category) {
@@ -54,7 +59,9 @@ pub fn init_logging(log_dir: &str, categories: &[&str]) -> Result<(), Error> {
                             .open(&path)
                             .map_err(|e| LogError::FileOpenFailed(e.to_string()))?;
 
-                        let metadata = file.metadata().map_err(|e| LogError::MetadataFailed(e.to_string()))?;
+                        let metadata = file
+                            .metadata()
+                            .map_err(|e| LogError::MetadataFailed(e.to_string()))?;
                         write_separator(path, &mut file, metadata)?;
 
                         global_map.insert(category.to_string(), file);
@@ -72,9 +79,11 @@ pub fn init_logging(log_dir: &str, categories: &[&str]) -> Result<(), Error> {
 
 fn write_separator(_path: String, file: &mut File, metadata: Metadata) -> Result<(), Error> {
     if metadata.len() > 0 {
-        file.seek(SeekFrom::End(0)).map_err(|e| LogError::WriteFailed(e.to_string()))?;
+        file.seek(SeekFrom::End(0))
+            .map_err(|e| LogError::WriteFailed(e.to_string()))?;
         let separator = "\n\n\n########## NEW SESSION ##########\n";
-        file.write_all(separator.as_bytes()).map_err(|e| LogError::WriteFailed(e.to_string()))?;
+        file.write_all(separator.as_bytes())
+            .map_err(|e| LogError::WriteFailed(e.to_string()))?;
     }
     Ok(())
 }
@@ -105,7 +114,10 @@ pub fn log_message(category: &str, message: &str) -> Result<(), Error> {
                 "No log file found for category '{}'. Did you call `init_logging` first?",
                 category
             );
-            Err(LogError::FileOpenFailed(format!("No log file found for category '{}'", category)).into())
+            Err(
+                LogError::FileOpenFailed(format!("No log file found for category '{}'", category))
+                    .into(),
+            )
         }
     } else {
         // LOG_MAP was never initialized (or we tried reading it too early).
@@ -168,11 +180,7 @@ mod tests {
         // Check that each corresponding file exists.
         for cat in &categories {
             let file_path = log_dir.join(format!("{}.log", cat));
-            assert!(
-                file_path.exists(),
-                "File not created for category {}",
-                cat
-            );
+            assert!(file_path.exists(), "File not created for category {}", cat);
         }
         Ok(())
     }
@@ -184,9 +192,11 @@ mod tests {
         let log_dir_str = log_dir.to_str().unwrap();
 
         // Manually create the log directory and an "existing.log" file with content.
-        fs::create_dir_all(&log_dir).map_err(|e| LogError::DirectoryCreationFailed(e.to_string()))?;
+        fs::create_dir_all(&log_dir)
+            .map_err(|e| LogError::DirectoryCreationFailed(e.to_string()))?;
         let file_path = log_dir.join("existing.log");
-        fs::write(&file_path, b"Existing content...").map_err(|e| LogError::WriteFailed(e.to_string()))?;
+        fs::write(&file_path, b"Existing content...")
+            .map_err(|e| LogError::WriteFailed(e.to_string()))?;
 
         // Initialize logging with the "existing" category.
         init_logging(log_dir_str, &["existing"])?;
@@ -277,4 +287,3 @@ mod tests {
         Ok(())
     }
 }
-
