@@ -136,7 +136,7 @@ pub(crate) fn start_player_thread(
     );
 
     if use_smart_mode {
-        search_for_exit_smart(player_name, player_stream, response);
+        search_for_exit_smart(player_name, player_stream, response)?;
     } else {
         search_for_exit(player_name, player_stream, response)?;
     }
@@ -1020,8 +1020,7 @@ fn update_map(
             }
         }
     }
-
-    return map;
+    map
 }
 
 // fixme remove, only for testing

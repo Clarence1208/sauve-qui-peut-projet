@@ -57,7 +57,6 @@ fn main() -> Result<(), Error> {
         .unwrap();
 
     // Step 3: Register the team
-    // fixme random team name generation for testing
     let team_name = format!("Team {}", rand::random::<u32>());
 
     let register_team_message = Message::RegisterTeam(RegisterTeam {
