@@ -1,4 +1,4 @@
-use crate::error::{DecodeError, Error};
+use SQP_common::error::{DecodeError, Error};
 
 fn char_to_value(c: char) -> Option<u8> {
     match c {

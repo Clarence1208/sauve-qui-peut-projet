@@ -1,21 +1,19 @@
 extern crate core;
 
 mod decoder;
-mod error;
-mod logger;
 mod models;
 mod player;
 mod request_models;
-mod server_utils;
 
-use crate::error::{Error, NetworkError, ProtocolError};
 use player::start_player_thread;
 use request_models::{Message, RegisterTeam};
-use server_utils::{parse_token_from_response, receive_message, send_message};
 use std::collections::HashMap;
 use std::net::TcpStream;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::{env, thread};
+use SQP_common::error::{Error, NetworkError, ProtocolError};
+use SQP_common::logger;
+use SQP_common::server_utils::{parse_token_from_response, receive_message, send_message};
 
 static SECRET_MAP: OnceLock<Arc<RwLock<HashMap<String, u64>>>> = OnceLock::new();
 

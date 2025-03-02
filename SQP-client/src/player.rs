@@ -1,9 +1,7 @@
 use crate::decoder::decode;
-use crate::error::{Error, NetworkError, PlayerError};
 use crate::logger::log_message;
 use crate::models::{turn_left, Direction, MapDirection};
 use crate::request_models::{Action, Answer, Message, SubscribePlayer};
-use crate::server_utils::{receive_message, send_message};
 use crate::SECRET_MAP;
 use log::{debug, error, info, warn};
 use serde_json::json;
@@ -14,6 +12,8 @@ use std::net::TcpStream;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+use SQP_common::error::{Error, NetworkError, PlayerError};
+use SQP_common::server_utils::{receive_message, send_message};
 
 /**
  * The Boundary enum represents the different types of boundaries in the labyrinth.
